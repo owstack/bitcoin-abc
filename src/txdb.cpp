@@ -14,6 +14,7 @@
 #include "ui_interface.h"
 #include "uint256.h"
 #include "util.h"
+#include "validation.h"
 
 #include <boost/thread.hpp>
 
@@ -410,7 +411,7 @@ bool CBlockTreeDB::ReadTimestampBlockIndex(const uint256 &hash, unsigned int &lt
 
     CTimestampBlockIndexValue(lts);
     if (!Read(std::make_pair(DB_BLOCKHASHINDEX, hash), lts))
-	return false;
+    return false;
 
     ltimestamp = lts.ltimestamp;
     return true;
