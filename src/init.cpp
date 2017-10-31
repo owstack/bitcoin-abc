@@ -28,6 +28,7 @@
 #include "rpc/register.h"
 #include "rpc/server.h"
 #include "scheduler.h"
+#include "script/scriptcache.h"
 #include "script/sigcache.h"
 #include "script/standard.h"
 #include "timedata.h"
@@ -58,7 +59,6 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/function.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/thread.hpp>
 #include <openssl/crypto.h>
@@ -142,9 +142,9 @@ bool ShutdownRequested() {
 class CCoinsViewErrorCatcher : public CCoinsViewBacked {
 public:
     CCoinsViewErrorCatcher(CCoinsView *view) : CCoinsViewBacked(view) {}
-    bool GetCoins(const uint256 &txid, CCoins &coins) const {
+    bool GetCoin(const COutPoint &outpoint, Coin &coin) const {
         try {
-            return CCoinsViewBacked::GetCoins(txid, coins);
+            return CCoinsViewBacked::GetCoin(outpoint, coin);
         } catch (const std::runtime_error &e) {
             uiInterface.ThreadSafeMessageBox(
                 _("Error reading from database, shutting down."), "",
@@ -272,7 +272,7 @@ void HandleSIGHUP(int) {
     fReopenDebugLog = true;
 }
 
-bool static Bind(CConnman &connman, const CService &addr, unsigned int flags) {
+static bool Bind(CConnman &connman, const CService &addr, unsigned int flags) {
     if (!(flags & BF_EXPLICIT) && IsLimited(addr)) return false;
     std::string strError;
     if (!connman.BindListenPort(addr, strError, (flags & BF_WHITELIST) != 0)) {
@@ -323,7 +323,7 @@ std::string HelpMessage(HelpMessageMode mode) {
         strUsage += HelpMessageOpt(
             "-blocksonly",
             strprintf(
-                _("Whether to operate in a blocks only mode (default: %u)"),
+                _("Whether to operate in a blocks only mode (default: %d)"),
                 DEFAULT_BLOCKSONLY));
     strUsage += HelpMessageOpt(
         "-assumevalid=<hex>",
@@ -355,7 +355,7 @@ std::string HelpMessage(HelpMessageMode mode) {
     if (showDebug)
         strUsage += HelpMessageOpt(
             "-feefilter", strprintf("Tell other nodes to filter invs to us by "
-                                    "our mempool min fee (default: %u)",
+                                    "our mempool min fee (default: %d)",
                                     DEFAULT_FEEFILTER));
     strUsage += HelpMessageOpt(
         "-loadblock=<file>",
@@ -417,7 +417,7 @@ std::string HelpMessage(HelpMessageMode mode) {
 #endif
     strUsage += HelpMessageOpt(
         "-txindex", strprintf(_("Maintain a full transaction index, used by "
-                                "the getrawtransaction rpc call (default: %u)"),
+                                "the getrawtransaction rpc call (default: %d)"),
                               DEFAULT_TXINDEX));
 
     strUsage += HelpMessageOpt("-addressindex", strprintf(_("Maintain a full address index, used to query for the balance, txids and unspent outputs for addresses (default: %u)"), DEFAULT_ADDRESSINDEX));
@@ -449,7 +449,7 @@ std::string HelpMessage(HelpMessageMode mode) {
                                  "listening and no -externalip or -proxy)"));
     strUsage += HelpMessageOpt(
         "-dns", _("Allow DNS lookups for -addnode, -seednode and -connect") +
-                    " " + strprintf(_("(default: %u)"), DEFAULT_NAME_LOOKUP));
+                    " " + strprintf(_("(default: %d)"), DEFAULT_NAME_LOOKUP));
     strUsage += HelpMessageOpt(
         "-dnsseed", _("Query for peer addresses via DNS lookup, if low on "
                       "addresses (default: 1 unless -connect/-noconnect)"));
@@ -458,7 +458,7 @@ std::string HelpMessage(HelpMessageMode mode) {
     strUsage += HelpMessageOpt(
         "-forcednsseed",
         strprintf(
-            _("Always query for peer addresses via DNS lookup (default: %u)"),
+            _("Always query for peer addresses via DNS lookup (default: %d)"),
             DEFAULT_FORCEDNSSEED));
     strUsage +=
         HelpMessageOpt("-listen", _("Accept connections from outside (default: "
@@ -496,12 +496,12 @@ std::string HelpMessage(HelpMessageMode mode) {
         _("Only connect to nodes in network <net> (ipv4, ipv6 or onion)"));
     strUsage +=
         HelpMessageOpt("-permitbaremultisig",
-                       strprintf(_("Relay non-P2SH multisig (default: %u)"),
+                       strprintf(_("Relay non-P2SH multisig (default: %d)"),
                                  DEFAULT_PERMIT_BAREMULTISIG));
     strUsage += HelpMessageOpt(
         "-peerbloomfilters",
         strprintf(_("Support filtering of blocks and transaction with bloom "
-                    "filters (default: %u)"),
+                    "filters (default: %d)"),
                   DEFAULT_PEERBLOOMFILTERS));
     strUsage += HelpMessageOpt(
         "-port=<port>",
@@ -514,7 +514,7 @@ std::string HelpMessage(HelpMessageMode mode) {
     strUsage += HelpMessageOpt(
         "-proxyrandomize",
         strprintf(_("Randomize credentials for every proxy connection. This "
-                    "enables Tor stream isolation (default: %u)"),
+                    "enables Tor stream isolation (default: %d)"),
                   DEFAULT_PROXYRANDOMIZE));
     strUsage += HelpMessageOpt(
         "-seednode=<ip>",
@@ -605,24 +605,24 @@ std::string HelpMessage(HelpMessageMode mode) {
             strprintf(
                 "Do a full consistency check for mapBlockIndex, "
                 "setBlockIndexCandidates, chainActive and mapBlocksUnlinked "
-                "occasionally. Also sets -checkmempool (default: %u)",
+                "occasionally. Also sets -checkmempool (default: %d)",
                 Params(CBaseChainParams::MAIN).DefaultConsistencyChecks()));
         strUsage += HelpMessageOpt(
             "-checkmempool=<n>",
             strprintf(
-                "Run checks every <n> transactions (default: %u)",
+                "Run checks every <n> transactions (default: %d)",
                 Params(CBaseChainParams::MAIN).DefaultConsistencyChecks()));
         strUsage += HelpMessageOpt(
             "-checkpoints", strprintf("Disable expensive verification for "
-                                      "known chain history (default: %u)",
+                                      "known chain history (default: %d)",
                                       DEFAULT_CHECKPOINTS_ENABLED));
         strUsage += HelpMessageOpt(
             "-disablesafemode", strprintf("Disable safemode, override a real "
-                                          "safe mode event (default: %u)",
+                                          "safe mode event (default: %d)",
                                           DEFAULT_DISABLE_SAFEMODE));
         strUsage += HelpMessageOpt(
             "-testsafemode",
-            strprintf("Force safe mode (default: %u)", DEFAULT_TESTSAFEMODE));
+            strprintf("Force safe mode (default: %d)", DEFAULT_TESTSAFEMODE));
         strUsage +=
             HelpMessageOpt("-dropmessagestest=<n>",
                            "Randomly drop 1 of every <n> network messages");
@@ -632,7 +632,7 @@ std::string HelpMessage(HelpMessageMode mode) {
         strUsage += HelpMessageOpt(
             "-stopafterblockimport",
             strprintf(
-                "Stop running after importing blocks from disk (default: %u)",
+                "Stop running after importing blocks from disk (default: %d)",
                 DEFAULT_STOPAFTERBLOCKIMPORT));
         strUsage += HelpMessageOpt(
             "-limitancestorcount=<n>",
@@ -681,17 +681,17 @@ std::string HelpMessage(HelpMessageMode mode) {
         _("Show all debugging options (usage: --help -help-debug)"));
     strUsage += HelpMessageOpt(
         "-logips",
-        strprintf(_("Include IP addresses in debug output (default: %u)"),
+        strprintf(_("Include IP addresses in debug output (default: %d)"),
                   DEFAULT_LOGIPS));
     strUsage += HelpMessageOpt(
         "-logtimestamps",
-        strprintf(_("Prepend debug output with timestamp (default: %u)"),
+        strprintf(_("Prepend debug output with timestamp (default: %d)"),
                   DEFAULT_LOGTIMESTAMPS));
     if (showDebug) {
         strUsage += HelpMessageOpt(
             "-logtimemicros",
             strprintf(
-                "Add microsecond precision to debug timestamps (default: %u)",
+                "Add microsecond precision to debug timestamps (default: %d)",
                 DEFAULT_LOGTIMEMICROS));
         strUsage += HelpMessageOpt(
             "-mocktime=<n>",
@@ -704,12 +704,16 @@ std::string HelpMessage(HelpMessageMode mode) {
         strUsage +=
             HelpMessageOpt("-relaypriority",
                            strprintf("Require high priority for relaying free "
-                                     "or low-fee transactions (default: %u)",
+                                     "or low-fee transactions (default: %d)",
                                      DEFAULT_RELAYPRIORITY));
         strUsage += HelpMessageOpt(
             "-maxsigcachesize=<n>",
             strprintf("Limit size of signature cache to <n> MiB (default: %u)",
                       DEFAULT_MAX_SIG_CACHE_SIZE));
+        strUsage += HelpMessageOpt(
+            "-maxscriptcachesize=<n>",
+            strprintf("Limit size of script cache to <n> MiB (default: %u)",
+                      DEFAULT_MAX_SCRIPT_CACHE_SIZE));
         strUsage += HelpMessageOpt(
             "-maxtipage=<n>",
             strprintf("Maximum tip age in seconds to consider node in initial "
@@ -734,7 +738,7 @@ std::string HelpMessage(HelpMessageMode mode) {
     if (showDebug) {
         strUsage += HelpMessageOpt(
             "-printpriority", strprintf("Log transaction priority and fee per "
-                                        "kB when mining blocks (default: %u)",
+                                        "kB when mining blocks (default: %d)",
                                         DEFAULT_PRINTPRIORITY));
     }
     strUsage += HelpMessageOpt("-shrinkdebugfile",
@@ -748,7 +752,7 @@ std::string HelpMessage(HelpMessageMode mode) {
         strUsage += HelpMessageOpt(
             "-acceptnonstdtxn",
             strprintf(
-                "Relay and mine \"non-standard\" transactions (%sdefault: %u)",
+                "Relay and mine \"non-standard\" transactions (%sdefault: %d)",
                 "testnet/regtest only; ",
                 !Params(CBaseChainParams::TESTNET).RequireStandard()));
         strUsage +=
@@ -776,7 +780,7 @@ std::string HelpMessage(HelpMessageMode mode) {
                                  DEFAULT_BYTES_PER_SIGOP));
     strUsage += HelpMessageOpt(
         "-datacarrier",
-        strprintf(_("Relay and mine data carrier transactions (default: %u)"),
+        strprintf(_("Relay and mine data carrier transactions (default: %d)"),
                   DEFAULT_ACCEPT_DATACARRIER));
     strUsage += HelpMessageOpt(
         "-datacarriersize",
@@ -789,11 +793,11 @@ std::string HelpMessage(HelpMessageMode mode) {
         "-blockmaxsize=<n>",
         strprintf(_("Set maximum block size in bytes (default: %d)"),
                   DEFAULT_MAX_GENERATED_BLOCK_SIZE));
-    strUsage +=
-        HelpMessageOpt("-blockprioritysize=<n>",
-                       strprintf(_("Set maximum size of high-priority/low-fee "
-                                   "transactions in bytes (default: %d)"),
-                                 DEFAULT_BLOCK_PRIORITY_SIZE));
+    strUsage += HelpMessageOpt(
+        "-blockprioritypercentage=<n>",
+        strprintf(_("Set maximum percentage of a block reserved to "
+                    "high-priority/low-fee transactions (default: %d)"),
+                  DEFAULT_BLOCK_PRIORITY_PERCENTAGE));
     strUsage += HelpMessageOpt(
         "-blockmintxfee=<amt>",
         strprintf(_("Set lowest fee rate (in %s/kB) for transactions to be "
@@ -808,7 +812,7 @@ std::string HelpMessage(HelpMessageMode mode) {
     strUsage += HelpMessageOpt("-server",
                                _("Accept command line and JSON-RPC commands"));
     strUsage += HelpMessageOpt(
-        "-rest", strprintf(_("Accept public REST requests (default: %u)"),
+        "-rest", strprintf(_("Accept public REST requests (default: %d)"),
                            DEFAULT_REST_ENABLE));
     strUsage += HelpMessageOpt(
         "-rpcbind=<addr>",
@@ -857,13 +861,6 @@ std::string HelpMessage(HelpMessageMode mode) {
             strprintf("Timeout during HTTP requests (default: %d)",
                       DEFAULT_HTTP_SERVER_TIMEOUT));
     }
-
-    strUsage += HelpMessageGroup(_("Hard Fork options:"));
-    strUsage +=
-        HelpMessageOpt("-uahfstarttime=<n>",
-                       strprintf(_("UAHF activation (integer) POSIX "
-                                   "time, seconds since epoch (default: %u)"),
-                                 DEFAULT_UAHF_START_TIME));
 
     return strUsage;
 }
@@ -1059,7 +1056,15 @@ bool InitSanityCheck(void) {
             "Elliptic curve cryptography sanity check failure. Aborting.");
         return false;
     }
-    if (!glibc_sanity_test() || !glibcxx_sanity_test()) return false;
+
+    if (!glibc_sanity_test() || !glibcxx_sanity_test()) {
+        return false;
+    }
+
+    if (!Random_SanityCheck()) {
+        InitError("OS cryptographic RNG sanity check failure. Aborting.");
+        return false;
+    }
 
     return true;
 }
@@ -1183,7 +1188,7 @@ void InitLogging() {
     fLogIPs = GetBoolArg("-logips", DEFAULT_LOGIPS);
 
     LogPrintf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    LogPrintf("Bitcoin version %s\n", FormatFullVersion());
+    LogPrintf("%s version %s\n", CLIENT_NAME, FormatFullVersion());
 }
 
 namespace { // Variables internal to initialization process only
@@ -1276,6 +1281,15 @@ bool AppInitParameterInteraction(Config &config) {
     if (GetArg("-prune", 0)) {
         if (GetBoolArg("-txindex", DEFAULT_TXINDEX))
             return InitError(_("Prune mode is incompatible with -txindex."));
+    }
+
+    // if space reserved for high priority transactions is misconfigured
+    // stop program execution and warn the user with a proper error message
+    const int64_t blkprio =
+        GetArg("-blockprioritypercentage", DEFAULT_BLOCK_PRIORITY_PERCENTAGE);
+    if (!config.SetBlockPriorityPercentage(blkprio)) {
+        return InitError(_("Block priority percentage has to belong to the "
+                           "[0..100] interval."));
     }
 
     // Make sure enough file descriptors are available
@@ -1380,7 +1394,7 @@ bool AppInitParameterInteraction(Config &config) {
     // BIP 125 replacement in the mempool and the amount the mempool min fee
     // increases above the feerate of txs evicted due to mempool limiting.
     if (IsArgSet("-incrementalrelayfee")) {
-        CAmount n = 0;
+        Amount n = 0;
         if (!ParseMoney(GetArg("-incrementalrelayfee", ""), n))
             return InitError(AmountErrMsg("incrementalrelayfee",
                                           GetArg("-incrementalrelayfee", "")));
@@ -1404,33 +1418,12 @@ bool AppInitParameterInteraction(Config &config) {
     }
 
     // Check blockmaxsize does not exceed maximum accepted block size.
-    // Also checks that it isn't smaller than 1MB, as to make sure we can
-    // satisfy the "must be big" UAHF rule.
     const uint64_t nProposedMaxGeneratedBlockSize =
         GetArg("-blockmaxsize", DEFAULT_MAX_GENERATED_BLOCK_SIZE);
-    const bool maxGeneratedBlockSizeTooSmall =
-        nProposedMaxGeneratedBlockSize <= LEGACY_MAX_BLOCK_SIZE;
-    const bool maxGeneratedBlockSizeTooBig =
-        nProposedMaxGeneratedBlockSize > config.GetMaxBlockSize();
-    if (maxGeneratedBlockSizeTooSmall || maxGeneratedBlockSizeTooBig) {
-        auto msg =
-            _("Max generated block size (blockmaxsize) cannot be lower than "
-              "1MB or exceed the excessive block size (excessiveblocksize)");
-        if (maxGeneratedBlockSizeTooBig ||
-            !IsArgSet("-allowsmallgeneratedblocksize")) {
-            return InitError(msg);
-        }
-
-        InitWarning(msg);
-    }
-
-    const int64_t nProposedUAHFStartTime =
-        GetArg("-uahfstarttime", DEFAULT_UAHF_START_TIME);
-    if (!config.SetUAHFStartTime(nProposedUAHFStartTime)) {
-        return InitError(
-            strprintf(_("Unable to set uahfstarttime to the value (%d)"),
-                      nProposedUAHFStartTime));
-        assert(nProposedUAHFStartTime == config.GetUAHFStartTime());
+    if (nProposedMaxGeneratedBlockSize > config.GetMaxBlockSize()) {
+        auto msg = _("Max generated block size (blockmaxsize) cannot exceed "
+                     "the excessive block size (excessiveblocksize)");
+        return InitError(msg);
     }
 
     // block pruning; get the amount of disk space (in MiB) to allot for block &
@@ -1474,7 +1467,7 @@ bool AppInitParameterInteraction(Config &config) {
     // can cheaply fill blocks using 1-satoshi-fee transactions. It should be
     // set above the real cost to you of processing a transaction.
     if (IsArgSet("-minrelaytxfee")) {
-        CAmount n = 0;
+        Amount n = 0;
         if (!ParseMoney(GetArg("-minrelaytxfee", ""), n) || 0 == n)
             return InitError(
                 AmountErrMsg("minrelaytxfee", GetArg("-minrelaytxfee", "")));
@@ -1492,7 +1485,7 @@ bool AppInitParameterInteraction(Config &config) {
     // TODO: Harmonize which arguments need sanity checking and where that
     // happens.
     if (IsArgSet("-blockmintxfee")) {
-        CAmount n = 0;
+        Amount n = 0;
         if (!ParseMoney(GetArg("-blockmintxfee", ""), n))
             return InitError(
                 AmountErrMsg("blockmintxfee", GetArg("-blockmintxfee", "")));
@@ -1501,7 +1494,7 @@ bool AppInitParameterInteraction(Config &config) {
     // Feerate used to define dust.  Shouldn't be changed lightly as old
     // implementations may inadvertently create non-standard transactions.
     if (IsArgSet("-dustrelayfee")) {
-        CAmount n = 0;
+        Amount n = 0;
         if (!ParseMoney(GetArg("-dustrelayfee", ""), n) || 0 == n)
             return InitError(
                 AmountErrMsg("dustrelayfee", GetArg("-dustrelayfee", "")));
@@ -1535,6 +1528,9 @@ bool AppInitParameterInteraction(Config &config) {
     // TODO: remove some time after the hardfork when no longer needed
     // to differentiate the network nodes.
     nLocalServices = ServiceFlags(nLocalServices | NODE_BITCOIN_CASH);
+
+    // Preferentially keep peers which service NODE_BITCOIN_CASH
+    nRelevantServices = ServiceFlags(nRelevantServices | NODE_BITCOIN_CASH);
 
     nMaxTipAge = GetArg("-maxtipage", DEFAULT_MAX_TIP_AGE);
 
@@ -1669,12 +1665,14 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
               nMaxConnections, nFD);
 
     InitSignatureCache();
+    InitScriptExecutionCache();
 
     LogPrintf("Using %u threads for script verification\n",
               nScriptCheckThreads);
     if (nScriptCheckThreads) {
-        for (int i = 0; i < nScriptCheckThreads - 1; i++)
+        for (int i = 0; i < nScriptCheckThreads - 1; i++) {
             threadGroup.create_thread(&ThreadScriptCheck);
+        }
     }
 
     // Start the lightweight task scheduler thread
@@ -1710,7 +1708,7 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
 
     assert(!g_connman);
     g_connman = std::unique_ptr<CConnman>(
-        new CConnman(GetRand(std::numeric_limits<uint64_t>::max()),
+        new CConnman(config, GetRand(std::numeric_limits<uint64_t>::max()),
                      GetRand(std::numeric_limits<uint64_t>::max())));
     CConnman &connman = *g_connman;
 
@@ -1965,7 +1963,12 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
                     pblocktree->WriteReindexing(true);
                     // If we're reindexing in prune mode, wipe away unusable
                     // block files and all undo data files
-                    if (fPruneMode) CleanupBlockRevFiles();
+                    if (fPruneMode) {
+                        CleanupBlockRevFiles();
+                    }
+                } else if (!pcoinsdbview->Upgrade()) {
+                    strLoadError = _("Error upgrading chainstate database");
+                    break;
                 }
 
                 if (!LoadBlockIndex(chainparams)) {
@@ -2160,7 +2163,7 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     }
 
     threadGroup.create_thread(
-        boost::bind(&ThreadImport, boost::ref(config), vImportFiles));
+        boost::bind(&ThreadImport, std::ref(config), vImportFiles));
 
     // Wait for genesis block to be processed
     {
