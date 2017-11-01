@@ -4529,7 +4529,9 @@ bool CVerifyDB::VerifyDB(const Config &config, const CChainParams &chainparams,
     }
 
     // check level 4: try reconnecting blocks
-    if (nCheckLevel >= 4) {
+    // The lvl 4 checks were disabled because of the changes on DisconnectBlock on the fix:
+    // https://github.com/bitprim/bitcoin-abc/commit/c7e883c7ad1d58cdf8b04f01fa8459737dd68d29
+    if (false && nCheckLevel >= 4) {
         CBlockIndex *pindex = pindexState;
         while (pindex != chainActive.Tip()) {
             boost::this_thread::interruption_point();
