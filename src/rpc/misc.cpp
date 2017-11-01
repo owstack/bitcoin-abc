@@ -690,7 +690,7 @@ bool timestampSort(std::pair<CMempoolAddressDeltaKey, CMempoolAddressDelta> a,
 UniValue getaddressmempool(const Config &config, const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
-        throw runtime_error(
+        throw std::runtime_error(
             "getaddressmempool\n"
             "\nReturns all mempool deltas for an address (requires addressindex to be enabled).\n"
             "\nArguments:\n"
@@ -761,7 +761,7 @@ UniValue getaddressmempool(const Config &config, const JSONRPCRequest& request)
 UniValue getaddressutxos(const Config &config, const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
-        throw runtime_error(
+        throw std::runtime_error(
             "getaddressutxos\n"
             "\nReturns all unspent outputs for an address (requires addressindex to be enabled).\n"
             "\nArguments:\n"
@@ -847,7 +847,7 @@ UniValue getaddressutxos(const Config &config, const JSONRPCRequest& request)
 UniValue getaddressdeltas(const Config &config, const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1 || !request.params[0].isObject())
-        throw runtime_error(
+        throw std::runtime_error(
             "getaddressdeltas\n"
             "\nReturns all changes for an address (requires addressindex to be enabled).\n"
             "\nArguments:\n"
@@ -972,7 +972,7 @@ UniValue getaddressdeltas(const Config &config, const JSONRPCRequest& request)
 UniValue getaddressbalance(const Config &config, const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
-        throw runtime_error(
+        throw std::runtime_error(
             "getaddressbalance\n"
             "\nReturns the balance for an address(es) (requires addressindex to be enabled).\n"
             "\nArguments:\n"
@@ -1028,7 +1028,7 @@ UniValue getaddressbalance(const Config &config, const JSONRPCRequest& request)
 UniValue getaddresstxids(const Config &config, const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 1)
-        throw runtime_error(
+        throw std::runtime_error(
             "getaddresstxids\n"
             "\nReturns the txids for an address(es) (requires addressindex to be enabled).\n"
             "\nArguments:\n"
@@ -1112,7 +1112,7 @@ UniValue getspentinfo(const Config &config, const JSONRPCRequest& request)
 {
 
     if (request.fHelp || request.params.size() != 1 || !request.params[0].isObject())
-        throw runtime_error(
+        throw std::runtime_error(
             "getspentinfo\n"
             "\nReturns the txid and index where an output is spent.\n"
             "\nArguments:\n"
