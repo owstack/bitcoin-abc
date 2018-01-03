@@ -5,6 +5,7 @@
 #include "base58.h"
 
 #include "hash.h"
+#include "script/script.h"
 #include "uint256.h"
 
 #include <boost/variant/apply_visitor.hpp>
@@ -208,6 +209,57 @@ int CBase58Data::CompareTo(const CBase58Data &b58) const {
 }
 
 namespace {
+class DestinationEncoder : public boost::static_visitor<std::string> {
+private:
+    const CChainParams &m_params;
+
+public:
+    DestinationEncoder(const CChainParams &params) : m_params(params) {}
+
+    std::string operator()(const CKeyID &id) const {
+        std::vector<uint8_t> data =
+            m_params.Base58Prefix(CChainParams::PUBKEY_ADDRESS);
+        data.insert(data.end(), id.begin(), id.end());
+        return EncodeBase58Check(data);
+    }
+
+    std::string operator()(const CScriptID &id) const {
+        std::vector<uint8_t> data =
+            m_params.Base58Prefix(CChainParams::SCRIPT_ADDRESS);
+        data.insert(data.end(), id.begin(), id.end());
+        return EncodeBase58Check(data);
+    }
+
+    std::string operator()(const CNoDestination &no) const { return ""; }
+};
+
+CTxDestination DecodeDestination(const std::string &str,
+                                 const CChainParams &params) {
+    std::vector<uint8_t> data;
+    uint160 hash;
+    if (!DecodeBase58Check(str, data)) {
+        return CNoDestination();
+    }
+    // Base58Check decoding
+    const std::vector<uint8_t> &pubkey_prefix =
+        params.Base58Prefix(CChainParams::PUBKEY_ADDRESS);
+    if (data.size() == 20 + pubkey_prefix.size() &&
+        std::equal(pubkey_prefix.begin(), pubkey_prefix.end(), data.begin())) {
+        memcpy(hash.begin(), &data[pubkey_prefix.size()], 20);
+        return CKeyID(hash);
+    }
+    const std::vector<uint8_t> &script_prefix =
+        params.Base58Prefix(CChainParams::SCRIPT_ADDRESS);
+    if (data.size() == 20 + script_prefix.size() &&
+        std::equal(script_prefix.begin(), script_prefix.end(), data.begin())) {
+        memcpy(hash.begin(), &data[script_prefix.size()], 20);
+        return CScriptID(hash);
+    }
+    return CNoDestination();
+}
+} // namespace
+
+namespace {
 // The class CBitcoinAddress is already defined in the base58.h file
 
 class CBitcoinAddressVisitor : public boost::static_visitor<bool> {
@@ -328,20 +380,12 @@ bool CBitcoinSecret::SetString(const std::string &strSecret) {
     return SetString(strSecret.c_str());
 }
 
-std::string EncodeDestination(const CTxDestination &dest) {
-    CBitcoinAddress addr(dest);
-    return addr.IsValid() ? addr.ToString() : "";
+std::string EncodeLegacyAddr(const CTxDestination &dest,
+                             const CChainParams &params) {
+    return boost::apply_visitor(DestinationEncoder(params), dest);
 }
 
-CTxDestination DecodeDestination(const std::string &str) {
-    return CBitcoinAddress(str).Get();
-}
-
-bool IsValidDestinationString(const std::string &str,
-                              const CChainParams &params) {
-    return CBitcoinAddress(str).IsValid(params);
-}
-
-bool IsValidDestinationString(const std::string &str) {
-    return CBitcoinAddress(str).IsValid();
+CTxDestination DecodeLegacyAddr(const std::string &str,
+                                const CChainParams &params) {
+    return DecodeDestination(str, params);
 }

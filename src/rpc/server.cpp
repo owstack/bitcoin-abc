@@ -26,8 +26,6 @@
 #include <set>
 #include <unordered_map>
 
-using namespace RPCServer;
-
 static bool fRPCRunning = false;
 static bool fRPCInWarmup = true;
 static std::string rpcWarmupStatus("RPC server started");
@@ -114,18 +112,30 @@ void RPCTypeCheckObj(const UniValue &o,
 Amount AmountFromValue(const UniValue &value) {
     if (!value.isNum() && !value.isStr())
         throw JSONRPCError(RPC_TYPE_ERROR, "Amount is not a number or string");
-    CAmount amount;
-    if (!ParseFixedPoint(value.getValStr(), 8, &amount))
+
+    int64_t n;
+    if (!ParseFixedPoint(value.getValStr(), 8, &n))
         throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount");
-    if (!MoneyRange(amount))
+
+    Amount amt(n);
+    if (!MoneyRange(amt))
         throw JSONRPCError(RPC_TYPE_ERROR, "Amount out of range");
-    return Amount(amount);
+    return amt;
 }
 
 UniValue ValueFromAmount(const Amount &amount) {
     int64_t amt = amount.GetSatoshis();
     bool sign = amt < 0;
     int64_t n_abs = (sign ? -amt : amt);
+    int64_t quotient = n_abs / COIN.GetSatoshis();
+    int64_t remainder = n_abs % COIN.GetSatoshis();
+    return UniValue(UniValue::VNUM, strprintf("%s%d.%08d", sign ? "-" : "",
+                                              quotient, remainder));
+}
+
+UniValue ValueFromCAmount(const CAmount &amount) {
+    bool sign = amount < 0;
+    int64_t n_abs = (sign ? -amount : amount);
     int64_t quotient = n_abs / COIN.GetSatoshis();
     int64_t remainder = n_abs % COIN.GetSatoshis();
     return UniValue(UniValue::VNUM, strprintf("%s%d.%08d", sign ? "-" : "",

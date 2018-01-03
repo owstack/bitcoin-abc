@@ -45,6 +45,7 @@
 #include "wallet/wallet.h"
 #endif
 #include "warnings.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -61,7 +62,6 @@
 #include <boost/filesystem.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/thread.hpp>
-#include <openssl/crypto.h>
 
 #if ENABLE_ZMQ
 #include "zmq/zmqnotificationinterface.h"
@@ -142,7 +142,7 @@ bool ShutdownRequested() {
 class CCoinsViewErrorCatcher : public CCoinsViewBacked {
 public:
     CCoinsViewErrorCatcher(CCoinsView *view) : CCoinsViewBacked(view) {}
-    bool GetCoin(const COutPoint &outpoint, Coin &coin) const {
+    bool GetCoin(const COutPoint &outpoint, Coin &coin) const override {
         try {
             return CCoinsViewBacked::GetCoin(outpoint, coin);
         } catch (const std::runtime_error &e) {
@@ -419,6 +419,9 @@ std::string HelpMessage(HelpMessageMode mode) {
         "-txindex", strprintf(_("Maintain a full transaction index, used by "
                                 "the getrawtransaction rpc call (default: %d)"),
                               DEFAULT_TXINDEX));
+    strUsage += HelpMessageOpt(
+        "-usecashaddr", _("Use Cash Address for destination encoding instead "
+                          "of base58 (activate by default on Jan, 14)"));
 
     strUsage += HelpMessageOpt("-addressindex", strprintf(_("Maintain a full address index, used to query for the balance, txids and unspent outputs for addresses (default: %u)"), DEFAULT_ADDRESSINDEX));
     strUsage += HelpMessageOpt("-timestampindex", strprintf(_("Maintain a timestamp index for block hashes, used to query blocks hashes by a range of timestamps (default: %u)"), DEFAULT_TIMESTAMPINDEX));
@@ -1394,7 +1397,7 @@ bool AppInitParameterInteraction(Config &config) {
     // BIP 125 replacement in the mempool and the amount the mempool min fee
     // increases above the feerate of txs evicted due to mempool limiting.
     if (IsArgSet("-incrementalrelayfee")) {
-        Amount n = 0;
+        Amount n(0);
         if (!ParseMoney(GetArg("-incrementalrelayfee", ""), n))
             return InitError(AmountErrMsg("incrementalrelayfee",
                                           GetArg("-incrementalrelayfee", "")));
@@ -1467,8 +1470,9 @@ bool AppInitParameterInteraction(Config &config) {
     // can cheaply fill blocks using 1-satoshi-fee transactions. It should be
     // set above the real cost to you of processing a transaction.
     if (IsArgSet("-minrelaytxfee")) {
-        Amount n = 0;
-        if (!ParseMoney(GetArg("-minrelaytxfee", ""), n) || 0 == n)
+        Amount n(0);
+        auto parsed = ParseMoney(GetArg("-minrelaytxfee", ""), n);
+        if (!parsed || Amount(0) == n)
             return InitError(
                 AmountErrMsg("minrelaytxfee", GetArg("-minrelaytxfee", "")));
         // High fee check is done afterward in CWallet::ParameterInteraction()
@@ -1485,7 +1489,7 @@ bool AppInitParameterInteraction(Config &config) {
     // TODO: Harmonize which arguments need sanity checking and where that
     // happens.
     if (IsArgSet("-blockmintxfee")) {
-        Amount n = 0;
+        Amount n(0);
         if (!ParseMoney(GetArg("-blockmintxfee", ""), n))
             return InitError(
                 AmountErrMsg("blockmintxfee", GetArg("-blockmintxfee", "")));
@@ -1494,8 +1498,9 @@ bool AppInitParameterInteraction(Config &config) {
     // Feerate used to define dust.  Shouldn't be changed lightly as old
     // implementations may inadvertently create non-standard transactions.
     if (IsArgSet("-dustrelayfee")) {
-        Amount n = 0;
-        if (!ParseMoney(GetArg("-dustrelayfee", ""), n) || 0 == n)
+        Amount n(0);
+        auto parsed = ParseMoney(GetArg("-dustrelayfee", ""), n);
+        if (!parsed || Amount(0) == n)
             return InitError(
                 AmountErrMsg("dustrelayfee", GetArg("-dustrelayfee", "")));
         dustRelayFee = CFeeRate(n);
@@ -1528,9 +1533,6 @@ bool AppInitParameterInteraction(Config &config) {
     // TODO: remove some time after the hardfork when no longer needed
     // to differentiate the network nodes.
     nLocalServices = ServiceFlags(nLocalServices | NODE_BITCOIN_CASH);
-
-    // Preferentially keep peers which service NODE_BITCOIN_CASH
-    nRelevantServices = ServiceFlags(nRelevantServices | NODE_BITCOIN_CASH);
 
     nMaxTipAge = GetArg("-maxtipage", DEFAULT_MAX_TIP_AGE);
 
@@ -1578,6 +1580,7 @@ bool AppInitParameterInteraction(Config &config) {
             }
         }
     }
+
     return true;
 }
 
@@ -1651,11 +1654,14 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
         ShrinkDebugFile();
     }
 
-    if (fPrintToDebugLog) OpenDebugLog();
+    if (fPrintToDebugLog) {
+        OpenDebugLog();
+    }
 
-    if (!fLogTimestamps)
+    if (!fLogTimestamps) {
         LogPrintf("Startup time: %s\n",
                   DateTimeStrFormat("%Y-%m-%d %H:%M:%S", GetTime()));
+    }
     LogPrintf("Default data directory %s\n", GetDefaultDataDir().string());
     LogPrintf("Using data directory %s\n", GetDataDir().string());
     LogPrintf("Using config file %s\n",
@@ -1688,16 +1694,19 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
      */
     if (GetBoolArg("-server", false)) {
         uiInterface.InitMessage.connect(SetRPCWarmupStatus);
-        if (!AppInitServers(config, threadGroup))
+        if (!AppInitServers(config, threadGroup)) {
             return InitError(
                 _("Unable to start HTTP server. See debug log for details."));
+        }
     }
 
     int64_t nStart;
 
 // Step 5: verify wallet database integrity
 #ifdef ENABLE_WALLET
-    if (!CWallet::Verify()) return false;
+    if (!CWallet::Verify()) {
+        return false;
+    }
 #endif
     // Step 6: network initialization
 
@@ -1751,9 +1760,10 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     if (proxyArg != "" && proxyArg != "0") {
         CService resolved(LookupNumeric(proxyArg.c_str(), 9050));
         proxyType addrProxy = proxyType(resolved, proxyRandomize);
-        if (!addrProxy.IsValid())
+        if (!addrProxy.IsValid()) {
             return InitError(
                 strprintf(_("Invalid -proxy address: '%s'"), proxyArg));
+        }
 
         SetProxy(NET_IPV4, addrProxy);
         SetProxy(NET_IPV6, addrProxy);
@@ -1775,9 +1785,10 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
         } else {
             CService resolved(LookupNumeric(onionArg.c_str(), 9050));
             proxyType addrOnion = proxyType(resolved, proxyRandomize);
-            if (!addrOnion.IsValid())
+            if (!addrOnion.IsValid()) {
                 return InitError(
                     strprintf(_("Invalid -onion address: '%s'"), onionArg));
+            }
             SetProxy(NET_TOR, addrOnion);
             SetLimited(NET_TOR, false);
         }
@@ -1794,8 +1805,10 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
         if (mapMultiArgs.count("-bind")) {
             for (const std::string &strBind : mapMultiArgs.at("-bind")) {
                 CService addrBind;
-                if (!Lookup(strBind.c_str(), addrBind, GetListenPort(), false))
+                if (!Lookup(strBind.c_str(), addrBind, GetListenPort(),
+                            false)) {
                     return InitError(ResolveErrMsg("bind", strBind));
+                }
                 fBound |=
                     Bind(connman, addrBind, (BF_EXPLICIT | BF_REPORT_ERROR));
             }
@@ -1803,12 +1816,14 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
         if (mapMultiArgs.count("-whitebind")) {
             for (const std::string &strBind : mapMultiArgs.at("-whitebind")) {
                 CService addrBind;
-                if (!Lookup(strBind.c_str(), addrBind, 0, false))
+                if (!Lookup(strBind.c_str(), addrBind, 0, false)) {
                     return InitError(ResolveErrMsg("whitebind", strBind));
-                if (addrBind.GetPort() == 0)
+                }
+                if (addrBind.GetPort() == 0) {
                     return InitError(strprintf(
                         _("Need to specify a port with -whitebind: '%s'"),
                         strBind));
+                }
                 fBound |= Bind(connman, addrBind,
                                (BF_EXPLICIT | BF_REPORT_ERROR | BF_WHITELIST));
             }
@@ -1821,9 +1836,10 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
             fBound |= Bind(connman, CService(inaddr_any, GetListenPort()),
                            !fBound ? BF_REPORT_ERROR : BF_NONE);
         }
-        if (!fBound)
+        if (!fBound) {
             return InitError(_("Failed to listen on any port. Use -listen=0 if "
                                "you want this."));
+        }
     }
 
     if (mapMultiArgs.count("-externalip")) {
@@ -1831,10 +1847,11 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
             CService addrLocal;
             if (Lookup(strAddr.c_str(), addrLocal, GetListenPort(),
                        fNameLookup) &&
-                addrLocal.IsValid())
+                addrLocal.IsValid()) {
                 AddLocal(addrLocal, LOCAL_MANUAL);
-            else
+            } else {
                 return InitError(ResolveErrMsg("externalip", strAddr));
+            }
         }
     }
 
@@ -1873,7 +1890,11 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
         for (unsigned int i = 1; i < 10000; i++) {
             boost::filesystem::path source =
                 GetDataDir() / strprintf("blk%04u.dat", i);
-            if (!boost::filesystem::exists(source)) break;
+
+            if (!boost::filesystem::exists(source)) {
+                break;
+            }
+
             boost::filesystem::path dest =
                 blocksDir / strprintf("blk%05u.dat", i - 1);
             try {
@@ -1981,9 +2002,10 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
                 // around).
                 if (!mapBlockIndex.empty() &&
                     mapBlockIndex.count(
-                        chainparams.GetConsensus().hashGenesisBlock) == 0)
+                        chainparams.GetConsensus().hashGenesisBlock) == 0) {
                     return InitError(_("Incorrect or no genesis block found. "
                                        "Wrong datadir for network?"));
+                }
 
                 // Initialize the block index (no-op if non-empty database was
                 // already loaded)
@@ -2030,7 +2052,7 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
 
                 if (!fReindex && chainActive.Tip() != nullptr) {
                     uiInterface.InitMessage(_("Rewinding blocks..."));
-                    if (!RewindBlockIndex(config, chainparams)) {
+                    if (!RewindBlockIndex(config)) {
                         strLoadError = _("Unable to rewind the database to a "
                                          "pre-fork state. You will need to "
                                          "redownload the blockchain");
@@ -2064,14 +2086,16 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
                 }
 
                 if (!CVerifyDB().VerifyDB(
-                        config, chainparams, pcoinsdbview,
+                        config, pcoinsdbview,
                         GetArg("-checklevel", DEFAULT_CHECKLEVEL),
                         GetArg("-checkblocks", DEFAULT_CHECKBLOCKS))) {
                     strLoadError = _("Corrupted block database detected");
                     break;
                 }
             } catch (const std::exception &e) {
-                if (fDebug) LogPrintf("%s\n", e.what());
+                if (fDebug) {
+                    LogPrintf("%s\n", e.what());
+                }
                 strLoadError = _("Error opening block database");
                 break;
             }
@@ -2119,6 +2143,11 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     if (!est_filein.IsNull()) mempool.ReadFeeEstimates(est_filein);
     fFeeEstimatesInitialized = true;
 
+    // Encoded addresses using cashaddr instead of base58
+    // Activates by default on Jan, 14
+    config.SetCashAddrEncoding(
+        GetBoolArg("-usecashaddr", GetAdjustedTime() > 1515900000));
+
 // Step 8: load wallet
 #ifdef ENABLE_WALLET
     if (!CWallet::InitLoadWallet()) return false;
@@ -2141,7 +2170,9 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
 
     // Step 10: import blocks
 
-    if (!CheckDiskSpace()) return false;
+    if (!CheckDiskSpace()) {
+        return false;
+    }
 
     // Either install a handler to notify us when genesis activates, or set
     // fHaveGenesis directly.
@@ -2179,8 +2210,9 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     //// debug print
     LogPrintf("mapBlockIndex.size() = %u\n", mapBlockIndex.size());
     LogPrintf("nBestHeight = %d\n", chainActive.Height());
-    if (GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION))
+    if (GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION)) {
         StartTorControl(threadGroup, scheduler);
+    }
 
     Discover(threadGroup);
 
@@ -2206,8 +2238,9 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     connOptions.nMaxOutboundTimeframe = nMaxOutboundTimeframe;
     connOptions.nMaxOutboundLimit = nMaxOutboundLimit;
 
-    if (!connman.Start(scheduler, strNodeError, connOptions))
+    if (!connman.Start(scheduler, strNodeError, connOptions)) {
         return InitError(strNodeError);
+    }
 
     // Step 12: finished
 
@@ -2215,7 +2248,9 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     uiInterface.InitMessage(_("Done loading"));
 
 #ifdef ENABLE_WALLET
-    if (pwalletMain) pwalletMain->postInitProcess(threadGroup);
+    if (pwalletMain) {
+        pwalletMain->postInitProcess(threadGroup);
+    }
 #endif
 
     return !fRequestShutdown;

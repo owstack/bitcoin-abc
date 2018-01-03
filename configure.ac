@@ -2,7 +2,7 @@ dnl require autoconf 2.60 (AS_ECHO/AS_ECHO_N)
 AC_PREREQ([2.60])
 define(_CLIENT_VERSION_MAJOR, 0)
 define(_CLIENT_VERSION_MINOR, 16)
-define(_CLIENT_VERSION_REVISION, 0)
+define(_CLIENT_VERSION_REVISION, 2)
 define(_CLIENT_VERSION_BUILD, 0)
 define(_CLIENT_VERSION_IS_RELEASE, true)
 define(_COPYRIGHT_YEAR, 2017)
@@ -225,39 +225,57 @@ AC_LANG_PUSH([C++])
 AX_CHECK_COMPILE_FLAG([-Werror],[CXXFLAG_WERROR="-Werror"],[CXXFLAG_WERROR=""])
 
 if test "x$enable_asan" = xyes; then
-	case $host in
-  	*mingw*)
-		AC_MSG_ERROR("Windows builds cannot use ASAN")
-		;;
-	esac
 	enable_debug=yes
-	CFLAGS="$CFLAGS -fsanitize=address -fno-omit-frame-pointer"
-	CXXFLAGS="$CXXFLAGS -fsanitize=address -fno-omit-frame-pointer"
-	LDFLAGS="$LDFLAGS -fsanitize=address"
+  asan_failed=no
+  AX_CHECK_COMPILE_FLAG([-fsanitize=address],
+    [CXXFLAGS="$CXXFLAGS -fsanitize=address"],
+    [asan_failed=yes])
+  AX_CHECK_LINK_FLAG([-fsanitize=address],
+    [LDFLAGS="$LDFLAGS -fsanitize=address"],
+    [asan_failed=yes])
+  AX_CHECK_COMPILE_FLAG([-fno-omit-frame-pointer],
+    [CXXFLAGS="$CXXFLAGS -fno-omit-frame-pointer"],
+    [asan_failed=yes])
+
+  if test "x$asan_failed" = xyes; then
+    AC_MSG_ERROR("ASAN is not supported")
+  fi
 fi
 
 if test "x$enable_tsan" = xyes; then
-	case $host in
-  	*mingw*)
-		AC_MSG_ERROR("Windows builds cannot use TSAN")
-		;;
-	esac
-	enable_debug=yes
-	CFLAGS="$CFLAGS -fsanitize=thread -fno-omit-frame-pointer"
-	CXXFLAGS="$CXXFLAGS -fsanitize=thread -fno-omit-frame-pointer"
-	LDFLAGS="$LDFLAGS -fsanitize=thread"
+  enable_debug=yes
+  tsan_failed=no
+  AX_CHECK_COMPILE_FLAG([-fsanitize=thread],
+    [CXXFLAGS="$CXXFLAGS -fsanitize=thread"],
+    [tsan_failed=yes])
+  AX_CHECK_LINK_FLAG([-fsanitize=thread],
+    [LDFLAGS="$LDFLAGS -fsanitize=thread"],
+    [tsan_failed=yes])
+  AX_CHECK_COMPILE_FLAG([-fno-omit-frame-pointer],
+    [CXXFLAGS="$CXXFLAGS -fno-omit-frame-pointer"],
+    [tsan_failed=yes])
+
+  if test "x$tsan_failed" = xyes; then
+    AC_MSG_ERROR("TSAN is not supported")
+  fi
 fi
 
 if test "x$enable_ubsan" = xyes; then
-	case $host in
-  	*mingw*)
-		AC_MSG_ERROR("Windows builds cannot use UBSAN")
-		;;
-	esac
-	enable_debug=yes
-	CFLAGS="$CFLAGS -fsanitize=undefined -fno-omit-frame-pointer"
-	CXXFLAGS="$CXXFLAGS -fsanitize=undefined -fno-omit-frame-pointer"
-	LDFLAGS="$LDFLAGS -fsanitize=undefined"
+  enable_debug=yes
+  ubsan_failed=no
+  AX_CHECK_COMPILE_FLAG([-fsanitize=undefined],
+    [CXXFLAGS="$CXXFLAGS -fsanitize=undefined"],
+    [ubsan_failed=yes])
+  AX_CHECK_LINK_FLAG([-fsanitize=undefined],
+    [LDFLAGS="$LDFLAGS -fsanitize=undefined"],
+    [ubsan_failed=yes])
+  AX_CHECK_COMPILE_FLAG([-fno-omit-frame-pointer],
+    [CXXFLAGS="$CXXFLAGS -fno-omit-frame-pointer"],
+    [ubsan_failed=yes])
+
+  if test "x$ubsan_failed" = xyes; then
+    AC_MSG_ERROR("UBSAN is not supported")
+  fi
 fi
 
 if test "x$enable_debug" = xyes; then
@@ -290,9 +308,6 @@ if test "x$CXXFLAGS_overridden" = "xno"; then
   ## unknown options if any other warning is produced. Test the -Wfoo case, and
   ## set the -Wno-foo case if it works.
   AX_CHECK_COMPILE_FLAG([-Wunused-parameter],[CXXFLAGS="$CXXFLAGS -Wno-unused-parameter"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Wself-assign],[CXXFLAGS="$CXXFLAGS -Wno-self-assign"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Wunused-local-typedef],[CXXFLAGS="$CXXFLAGS -Wno-unused-local-typedef"],,[[$CXXFLAG_WERROR]])
-  AX_CHECK_COMPILE_FLAG([-Wdeprecated-register],[CXXFLAGS="$CXXFLAGS -Wno-deprecated-register"],,[[$CXXFLAG_WERROR]])
 
   # Check for optional instruction set support. Enabling these does _not_ imply that all code will
   # be compiled with them, rather that specific objects/libs may use them after checking for runtime
@@ -722,7 +737,7 @@ fi
 if test x$use_boost = xyes; then
 
 dnl Minimum required Boost version
-define(MINIMUM_REQUIRED_BOOST, 1.47.0)
+define(MINIMUM_REQUIRED_BOOST, 1.55.0)
 
 dnl Check for boost libs
 AX_BOOST_BASE([MINIMUM_REQUIRED_BOOST])
@@ -1217,10 +1232,9 @@ AC_SUBST(EVENT_PTHREADS_LIBS)
 AC_SUBST(ZMQ_LIBS)
 AC_SUBST(PROTOBUF_LIBS)
 AC_SUBST(QR_LIBS)
-AC_CONFIG_FILES([Makefile src/Makefile doc/man/Makefile share/setup.nsi share/qt/Info.plist src/test/buildenv.py])
-AC_CONFIG_FILES([qa/pull-tester/tests_config.py],[chmod +x qa/pull-tester/tests_config.py])
+AC_CONFIG_FILES([Makefile src/Makefile doc/man/Makefile share/setup.nsi share/qt/Info.plist src/test/buildenv.py test/functional/config.ini])
 AC_CONFIG_FILES([contrib/devtools/split-debug.sh],[chmod +x contrib/devtools/split-debug.sh])
-AC_CONFIG_LINKS([qa/pull-tester/rpc-tests.py:qa/pull-tester/rpc-tests.py])
+AC_CONFIG_LINKS([test/functional/test_runner.py:test/functional/test_runner.py])
 
 dnl boost's m4 checks do something really nasty: they export these vars. As a
 dnl result, they leak into secp256k1's configure and crazy things happen.
@@ -1268,8 +1282,8 @@ esac
 dnl Replace the BUILDDIR path with the correct Windows path if compiling on Native Windows
 case ${OS} in
    *Windows*)
-     sed  's/BUILDDIR="\/\([[a-z]]\)/BUILDDIR="\1:/'  qa/pull-tester/tests_config.py > qa/pull-tester/tests_config-2.py
-     mv qa/pull-tester/tests_config-2.py qa/pull-tester/tests_config.py
+     sed  's/BUILDDIR="\/\([[a-z]]\)/BUILDDIR="\1:/'  test/pull-tester/tests_config.tests_config.ini > test/pull-tester/tests_config-2.tests_config.ini
+     mv test/pull-tester/tests_config-2.tests_config.ini test/pull-tester/tests_config.tests_config.ini
    ;;
 esac
 

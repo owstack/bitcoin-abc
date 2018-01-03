@@ -22,10 +22,6 @@ class CReserveKey;
 class CScript;
 class CWallet;
 
-namespace Consensus {
-struct Params;
-};
-
 static const bool DEFAULT_PRINTPRIORITY = false;
 
 struct CBlockTemplate {
@@ -217,7 +213,6 @@ private:
 void IncrementExtraNonce(const Config &config, CBlock *pblock,
                          const CBlockIndex *pindexPrev,
                          unsigned int &nExtraNonce);
-int64_t UpdateTime(CBlockHeader *pblock,
-                   const Consensus::Params &consensusParams,
+int64_t UpdateTime(CBlockHeader *pblock, const Config &config,
                    const CBlockIndex *pindexPrev);
 #endif // BITCOIN_MINER_H

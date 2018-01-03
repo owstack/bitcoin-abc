@@ -203,8 +203,8 @@ bool SignSignature(const CKeyStore &keystore, const CTransaction &txFrom,
     assert(txin.prevout.n < txFrom.vout.size());
     const CTxOut &txout = txFrom.vout[txin.prevout.n];
 
-    return SignSignature(keystore, txout.scriptPubKey, txTo, nIn,
-                         txout.nValue.GetSatoshis(), nHashType);
+    return SignSignature(keystore, txout.scriptPubKey, txTo, nIn, txout.nValue,
+                         nHashType);
 }
 
 static std::vector<valtype> CombineMultisig(
@@ -359,7 +359,7 @@ public:
 
     bool CheckSig(const std::vector<uint8_t> &scriptSig,
                   const std::vector<uint8_t> &vchPubKey,
-                  const CScript &scriptCode, uint32_t flags) const {
+                  const CScript &scriptCode, uint32_t flags) const override {
         return true;
     }
 };

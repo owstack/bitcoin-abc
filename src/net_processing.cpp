@@ -1228,8 +1228,7 @@ static void ProcessGetData(const Config &config, CNode *pfrom,
                 if (send && (mi->second->nStatus & BLOCK_HAVE_DATA)) {
                     // Send block from disk
                     CBlock block;
-                    if (!ReadBlockFromDisk(block, (*mi).second,
-                                           consensusParams)) {
+                    if (!ReadBlockFromDisk(block, (*mi).second, config)) {
                         assert(!"cannot load block from disk");
                     }
 
@@ -1600,9 +1599,6 @@ static bool ProcessMessage(const Config &config, CNode *pfrom,
                   pfrom->addr.ToString().c_str(), cleanSubVer, pfrom->nVersion,
                   pfrom->nStartingHeight, addrMe.ToString(), pfrom->id,
                   remoteAddr);
-        if (pfrom->fUsesCashMagic) {
-            LogPrintf("peer %d uses CASH magic in its headers\n", pfrom->id);
-        }
 
         int64_t nTimeOffset = nTime - GetTime();
         pfrom->nTimeOffset = nTimeOffset;
@@ -1983,8 +1979,7 @@ static bool ProcessMessage(const Config &config, CNode *pfrom,
         }
 
         CBlock block;
-        bool ret =
-            ReadBlockFromDisk(block, it->second, chainparams.GetConsensus());
+        bool ret = ReadBlockFromDisk(block, it->second, config);
         assert(ret);
 
         SendBlockTransactions(block, req, pfrom, connman);
@@ -3020,7 +3015,7 @@ static bool ProcessMessage(const Config &config, CNode *pfrom,
     }
 
     else if (strCommand == NetMsgType::FEEFILTER) {
-        Amount newFeeFilter = 0;
+        Amount newFeeFilter(0);
         vRecv >> newFeeFilter;
         if (MoneyRange(newFeeFilter)) {
             {
@@ -3132,16 +3127,9 @@ bool ProcessMessages(const Config &config, CNode *pfrom, CConnman &connman,
 
     msg.SetVersion(pfrom->GetRecvVersion());
 
-    // This is a new peer. Before doing anything, we need to detect what magic
-    // the peer is using.
-    if (pfrom->nVersion == 0 &&
-        memcmp(msg.hdr.pchMessageStart, chainparams.MessageStart(),
-               CMessageHeader::MESSAGE_START_SIZE) == 0) {
-        pfrom->fUsesCashMagic = false;
-    }
-
     // Scan for message start
-    if (memcmp(msg.hdr.pchMessageStart, pfrom->GetMagic(chainparams),
+    if (memcmp(std::begin(msg.hdr.pchMessageStart),
+               std::begin(chainparams.NetMagic()),
                CMessageHeader::MESSAGE_START_SIZE) != 0) {
         LogPrintf("PROCESSMESSAGE: INVALID MESSAGESTART %s peer=%d\n",
                   SanitizeString(msg.hdr.GetCommand()), pfrom->id);
@@ -3151,7 +3139,7 @@ bool ProcessMessages(const Config &config, CNode *pfrom, CConnman &connman,
 
     // Read header
     CMessageHeader &hdr = msg.hdr;
-    if (!hdr.IsValid(pfrom->GetMagic(chainparams))) {
+    if (!hdr.IsValid(chainparams.NetMagic())) {
         LogPrintf("PROCESSMESSAGE: ERRORS IN HEADER %s peer=%d\n",
                   SanitizeString(hdr.GetCommand()), pfrom->id);
         return fMoreWork;
@@ -3477,8 +3465,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
                 }
                 if (!fGotBlockFromCache) {
                     CBlock block;
-                    bool ret =
-                        ReadBlockFromDisk(block, pBestIndex, consensusParams);
+                    bool ret = ReadBlockFromDisk(block, pBestIndex, config);
                     assert(ret);
                     CBlockHeaderAndShortTxIDs cmpctblock(block);
                     connman.PushMessage(
@@ -3578,7 +3565,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
         if (fSendTrickle && pto->fSendMempool) {
             auto vtxinfo = mempool.infoAll();
             pto->fSendMempool = false;
-            Amount filterrate = 0;
+            Amount filterrate(0);
             {
                 LOCK(pto->cs_feeFilter);
                 filterrate = pto->minFeeFilter;
@@ -3590,7 +3577,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
                 const uint256 &txid = txinfo.tx->GetId();
                 CInv inv(MSG_TX, txid);
                 pto->setInventoryTxToSend.erase(txid);
-                if (filterrate != 0) {
+                if (filterrate != Amount(0)) {
                     if (txinfo.feeRate.GetFeePerK() < filterrate) {
                         continue;
                     }
@@ -3621,7 +3608,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
                  it != pto->setInventoryTxToSend.end(); it++) {
                 vInvTx.push_back(it);
             }
-            Amount filterrate = 0;
+            Amount filterrate(0);
             {
                 LOCK(pto->cs_feeFilter);
                 filterrate = pto->minFeeFilter;
@@ -3656,7 +3643,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
                 if (!txinfo.tx) {
                     continue;
                 }
-                if (filterrate != 0 &&
+                if (filterrate != Amount(0) &&
                     txinfo.feeRate.GetFeePerK() < filterrate) {
                     continue;
                 }
@@ -3808,8 +3795,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
             static CFeeRate default_feerate =
                 CFeeRate(DEFAULT_MIN_RELAY_TX_FEE);
             static FeeFilterRounder filterRounder(default_feerate);
-            Amount filterToSend =
-                filterRounder.round(currentFilter.GetSatoshis());
+            Amount filterToSend = filterRounder.round(currentFilter);
             // If we don't allow free transactions, then we always have a fee
             // filter of at least minRelayTxFee
             if (GetArg("-limitfreerelay", DEFAULT_LIMITFREERELAY) <= 0) {
@@ -3820,7 +3806,7 @@ bool SendMessages(const Config &config, CNode *pto, CConnman &connman,
             if (filterToSend != pto->lastSentFeeFilter) {
                 connman.PushMessage(
                     pto, msgMaker.Make(NetMsgType::FEEFILTER, filterToSend));
-                pto->lastSentFeeFilter = filterToSend.GetSatoshis();
+                pto->lastSentFeeFilter = filterToSend;
             }
             pto->nextSendTimeFeeFilter =
                 PoissonNextSend(timeNow, AVG_FEEFILTER_BROADCAST_INTERVAL);

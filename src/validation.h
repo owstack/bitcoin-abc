@@ -14,7 +14,7 @@
 #include "amount.h"
 #include "chain.h"
 #include "coins.h"
-#include "protocol.h" // For CMessageHeader::MessageStartChars
+#include "protocol.h" // For CMessageHeader::MessageMagic
 #include "script/script_error.h"
 #include "sync.h"
 #include "versionbits.h"
@@ -22,7 +22,10 @@
 #include "addressindex.h"
 #include "timestampindex.h"
 
+#include <boost/filesystem/path.hpp>
+
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <map>
@@ -30,11 +33,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <atomic>
-
-#include <boost/filesystem/path.hpp>
-#include <unordered_map>
 
 class CBlockIndex;
 class CBlockTreeDB;
@@ -175,15 +173,9 @@ static const int MAX_UNCONNECTING_HEADERS = 10;
 
 static const bool DEFAULT_PEERBLOOMFILTERS = true;
 
-struct BlockHasher {
-    size_t operator()(const uint256 &hash) const { return hash.GetCheapHash(); }
-};
-
 extern CScript COINBASE_FLAGS;
 extern CCriticalSection cs_main;
 extern CTxMemPool mempool;
-typedef std::unordered_map<uint256, CBlockIndex *, BlockHasher> BlockMap;
-extern BlockMap mapBlockIndex;
 extern uint64_t nLastBlockTx;
 extern uint64_t nLastBlockSize;
 extern const std::string strMessageMagic;
@@ -385,8 +377,8 @@ void PruneBlockFilesManual(int nPruneUpToHeight);
 /** Check is UAHF has activated. */
 bool IsUAHFenabled(const Config &config, const CBlockIndex *pindexPrev);
 
-/** Check is Cash HF has activated. */
-bool IsCashHFEnabled(const Config &config, const CBlockIndex *pindexPrev);
+/** Check is DAA HF has activated. */
+bool IsDAAEnabled(const Config &config, const CBlockIndex *pindexPrev);
 
 /** (try to) add transaction to memory pool
  * plTxnReplaced will be appended to with all transactions replaced from mempool
@@ -568,21 +560,17 @@ bool GetAddressUnspent(uint160 addressHash, int type,
 
 /** Functions for disk access for blocks */
 bool WriteBlockToDisk(const CBlock &block, CDiskBlockPos &pos,
-                      const CMessageHeader::MessageStartChars &messageStart);
+                      const CMessageHeader::MessageMagic &messageStart);
 bool ReadBlockFromDisk(CBlock &block, const CDiskBlockPos &pos,
-                       const Consensus::Params &consensusParams);
+                       const Config &config);
 bool ReadBlockFromDisk(CBlock &block, const CBlockIndex *pindex,
-                       const Consensus::Params &consensusParams);
+                       const Config &config);
 
 /** Functions for validating blocks and updating the block tree */
 
 /** Context-independent validity checks */
-bool CheckBlockHeader(const CBlockHeader &block, CValidationState &state,
-                      const Consensus::Params &consensusParams,
-                      bool fCheckPOW = true);
 bool CheckBlock(const Config &Config, const CBlock &block,
-                CValidationState &state,
-                const Consensus::Params &consensusParams, bool fCheckPOW = true,
+                CValidationState &state, bool fCheckPOW = true,
                 bool fCheckMerkleRoot = true);
 
 /**
@@ -592,9 +580,8 @@ bool CheckBlock(const Config &Config, const CBlock &block,
  * activation/deactivation and CLTV.
  */
 bool ContextualCheckTransaction(const Config &config, const CTransaction &tx,
-                                CValidationState &state,
-                                const Consensus::Params &consensusParams,
-                                int nHeight, int64_t nLockTimeCutoff);
+                                CValidationState &state, int nHeight,
+                                int64_t nLockTimeCutoff);
 
 /**
  * This is a variant of ContextualCheckTransaction which computes the contextual
@@ -602,42 +589,46 @@ bool ContextualCheckTransaction(const Config &config, const CTransaction &tx,
  *
  * See consensus/consensus.h for flag definitions.
  */
-bool ContextualCheckTransactionForCurrentBlock(
-    const Config &config, const CTransaction &tx, CValidationState &state,
-    const Consensus::Params &consensusParams, int flags = -1);
+bool ContextualCheckTransactionForCurrentBlock(const Config &config,
+                                               const CTransaction &tx,
+                                               CValidationState &state,
+                                               int flags = -1);
 
-/** Context-dependent validity checks.
- *  By "context", we mean only the previous block headers, but not the UTXO
- *  set; UTXO-related validity checks are done in ConnectBlock(). */
-bool ContextualCheckBlockHeader(const CBlockHeader &block,
-                                CValidationState &state,
-                                const Consensus::Params &consensusParams,
-                                const CBlockIndex *pindexPrev,
-                                int64_t nAdjustedTime);
+/**
+ * Context-dependent validity checks.
+ *
+ * By "context", we mean only the previous block headers, but not the UTXO set;
+ * UTXO-related validity checks are done in ConnectBlock().
+ */
 bool ContextualCheckBlock(const Config &config, const CBlock &block,
                           CValidationState &state,
                           const Consensus::Params &consensusParams,
                           const CBlockIndex *pindexPrev);
 
-/** Check a block is completely valid from start to finish (only works on top of
- * our current best block, with cs_main held) */
+/**
+ * Check a block is completely valid from start to finish (only works on top of
+ * our current best block, with cs_main held)
+ */
 bool TestBlockValidity(const Config &config, CValidationState &state,
-                       const CChainParams &chainparams, const CBlock &block,
-                       CBlockIndex *pindexPrev, bool fCheckPOW = true,
-                       bool fCheckMerkleRoot = true);
+                       const CBlock &block, CBlockIndex *pindexPrev,
+                       bool fCheckPOW = true, bool fCheckMerkleRoot = true);
 
-/** When there are blocks in the active chain with missing data, rewind the
- * chainstate and remove them from the block index */
-bool RewindBlockIndex(const Config &config, const CChainParams &params);
+/**
+ * When there are blocks in the active chain with missing data, rewind the
+ * chainstate and remove them from the block index.
+ */
+bool RewindBlockIndex(const Config &config);
 
-/** RAII wrapper for VerifyDB: Verify consistency of the block and coin
- * databases */
+/**
+ * RAII wrapper for VerifyDB: Verify consistency of the block and coin
+ * databases.
+ */
 class CVerifyDB {
 public:
     CVerifyDB();
     ~CVerifyDB();
-    bool VerifyDB(const Config &config, const CChainParams &chainparams,
-                  CCoinsView *coinsview, int nCheckLevel, int nCheckDepth);
+    bool VerifyDB(const Config &config, CCoinsView *coinsview, int nCheckLevel,
+                  int nCheckDepth);
 };
 
 /** Find the last common block between the parameter chain and a locator. */

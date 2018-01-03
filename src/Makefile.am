@@ -96,6 +96,7 @@ BITCOIN_CORE_H = \
   bloom.h \
   blockencodings.h \
   cashaddr.h \
+  cashaddrenc.h \
   chain.h \
   chainparams.h \
   chainparamsbase.h \
@@ -114,6 +115,7 @@ BITCOIN_CORE_H = \
   core_io.h \
   core_memusage.h \
   cuckoocache.h \
+  dstencode.h \
   globals.h \
   httprpc.h \
   httpserver.h \
@@ -143,6 +145,7 @@ BITCOIN_CORE_H = \
   rpc/misc.h \
   rpc/protocol.h \
   rpc/server.h \
+  rpc/tojson.h \
   rpc/register.h \
   scheduler.h \
   script/scriptcache.h \
@@ -187,9 +190,9 @@ BITCOIN_CORE_H = \
 
 
 obj/build.h: FORCE
-	@$(MKDIR_P) $(builddir)/obj
-	@$(top_srcdir)/share/genbuild.sh $(abs_top_builddir)/src/obj/build.h \
-	  $(abs_top_srcdir)
+	@$(MKDIR_P) "$(builddir)/obj"
+	@$(top_srcdir)/share/genbuild.sh "$(abs_top_builddir)/src/obj/build.h" \
+	  "$(abs_top_srcdir)"
 libbitcoin_util_a-clientversion.$(OBJEXT): obj/build.h
 
 # server: shared between bitcoind and bitcoin-qt
@@ -304,6 +307,7 @@ libbitcoin_consensus_a_SOURCES = \
   pubkey.cpp \
   pubkey.h \
   script/bitcoinconsensus.cpp \
+  script/sighashtype.h \
   script/interpreter.cpp \
   script/interpreter.h \
   script/script.cpp \
@@ -325,9 +329,13 @@ libbitcoin_common_a_SOURCES = \
   amount.cpp \
   base58.cpp \
   cashaddr.cpp \
+  cashaddrenc.cpp \
   chainparams.cpp \
+  config.cpp \
   coins.cpp \
   compressor.cpp \
+  dstencode.cpp \
+  globals.cpp \
   core_read.cpp \
   core_write.cpp \
   key.cpp \
@@ -358,6 +366,8 @@ libbitcoin_util_a_SOURCES = \
   support/cleanse.cpp \
   sync.cpp \
   threadinterrupt.cpp \
+  uint256.cpp \
+  uint256.h \
   util.cpp \
   utilmoneystr.cpp \
   utilstrencodings.cpp \
@@ -384,14 +394,9 @@ libbitcoin_seeder_a_SOURCES = \
   seeder/compat.h \
   seeder/db.cpp \
   seeder/db.h \
-  seeder/dns.c \
+  seeder/dns.cpp \
   seeder/dns.h \
-  seeder/netbase.cpp \
-  seeder/netbase.h \
-  seeder/protocol.cpp \
-  seeder/protocol.h \
   seeder/strlcpy.h \
-  seeder/util.cpp \
   seeder/util.h
 
 nodist_libbitcoin_util_a_SOURCES = $(srcdir)/obj/build.h
@@ -450,10 +455,11 @@ bitcoin_seeder_LDFLAGS = $(RELDFLAGS) $(AM_LDFLAGS) $(LIBTOOL_APP_LDFLAGS)
 
 bitcoin_seeder_LDADD = \
   $(LIBBITCOIN_SEEDER) \
+  $(LIBBITCOIN_COMMON) \
   $(LIBBITCOIN_UTIL) \
   $(LIBBITCOIN_CRYPTO)
 
-bitcoin_seeder_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS)
+bitcoin_seeder_LDADD += $(BOOST_LIBS) $(CRYPTO_LIBS)
 #
 
 # bitcoin-tx binary #

@@ -162,10 +162,11 @@ std::set<CBlockIndex *> setDirtyBlockIndex;
 std::set<int> setDirtyFileInfo;
 } // namespace
 
-/* Use this class to start tracking transactions that are removed from the
+/**
+ * Use this class to start tracking transactions that are removed from the
  * mempool and pass all those transactions through SyncTransaction when the
  * object goes out of scope. This is currently only used to call SyncTransaction
- * on conflicts removed from the mempool during block connection.  Applied in
+ * on conflicts removed from the mempool during block connection. Applied in
  * ActivateBestChain around ActivateBestStep which in turn calls:
  * ConnectTip->removeForBlock->removeConflicts
  */
@@ -493,9 +494,9 @@ static bool CheckTransactionCommon(const CTransaction &tx,
     }
 
     // Check for negative or overflow output values
-    Amount nValueOut = 0;
+    Amount nValueOut(0);
     for (const auto &txout : tx.vout) {
-        if (txout.nValue < 0) {
+        if (txout.nValue < Amount(0)) {
             return state.DoS(100, false, REJECT_INVALID,
                              "bad-txns-vout-negative");
         }
@@ -620,17 +621,16 @@ bool IsUAHFenabled(const Config &config, const CBlockIndex *pindexPrev) {
     return IsUAHFenabled(config, pindexPrev->nHeight);
 }
 
-static bool IsCashHFEnabled(const Config &config, int64_t nMedianTimePast) {
-    return nMedianTimePast >=
-           config.GetChainParams().GetConsensus().cashHardForkActivationTime;
+static bool IsDAAEnabled(const Config &config, int nHeight) {
+    return nHeight >= config.GetChainParams().GetConsensus().daaHeight;
 }
 
-bool IsCashHFEnabled(const Config &config, const CBlockIndex *pindexPrev) {
+bool IsDAAEnabled(const Config &config, const CBlockIndex *pindexPrev) {
     if (pindexPrev == nullptr) {
         return false;
     }
 
-    return IsCashHFEnabled(config, pindexPrev->GetMedianTimePast());
+    return IsDAAEnabled(config, pindexPrev->nHeight);
 }
 
 // Used to avoid mempool polluting consensus critical paths if CCoinsViewMempool
@@ -707,8 +707,7 @@ static bool AcceptToMemoryPoolWorker(
     // be mined yet.
     CValidationState ctxState;
     if (!ContextualCheckTransactionForCurrentBlock(
-            config, tx, ctxState, config.GetChainParams().GetConsensus(),
-            STANDARD_LOCKTIME_VERIFY_FLAGS)) {
+            config, tx, ctxState, STANDARD_LOCKTIME_VERIFY_FLAGS)) {
         // We copy the state from a dummy to ensure we don't increase the
         // ban score of peer for transaction that could be valid in the future.
         return state.DoS(
@@ -740,7 +739,7 @@ static bool AcceptToMemoryPoolWorker(
         CCoinsView dummy;
         CCoinsViewCache view(&dummy);
 
-        Amount nValueIn = 0;
+        Amount nValueIn(0);
         LockPoints lp;
         {
             LOCK(pool.cs);
@@ -835,10 +834,9 @@ static bool AcceptToMemoryPoolWorker(
             }
         }
 
-        CTxMemPoolEntry entry(ptx, nFees.GetSatoshis(), nAcceptTime, dPriority,
-                              chainActive.Height(),
-                              inChainInputValue.GetSatoshis(), fSpendsCoinbase,
-                              nSigOpsCount, lp);
+        CTxMemPoolEntry entry(ptx, nFees, nAcceptTime, dPriority,
+                              chainActive.Height(), inChainInputValue,
+                              fSpendsCoinbase, nSigOpsCount, lp);
         unsigned int nSize = entry.GetTxSize();
 
         // Check that the transaction doesn't have an excessive number of
@@ -855,9 +853,8 @@ static bool AcceptToMemoryPoolWorker(
         Amount mempoolRejectFee =
             pool.GetMinFee(GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) *
                            1000000)
-                .GetFee(nSize)
-                .GetSatoshis();
-        if (mempoolRejectFee > 0 && nModifiedFees < mempoolRejectFee) {
+                .GetFee(nSize);
+        if (mempoolRejectFee > Amount(0) && nModifiedFees < mempoolRejectFee) {
             return state.DoS(0, false, REJECT_INSUFFICIENTFEE,
                              "mempool min fee not met", false,
                              strprintf("%d < %d", nFees, mempoolRejectFee));
@@ -900,7 +897,7 @@ static bool AcceptToMemoryPoolWorker(
             dFreeCount += nSize;
         }
 
-        if (nAbsurdFee != 0 && nFees > nAbsurdFee) {
+        if (nAbsurdFee != Amount(0) && nFees > nAbsurdFee) {
             return state.Invalid(false, REJECT_HIGHFEE, "absurdly-high-fee",
                                  strprintf("%d > %d", nFees, nAbsurdFee));
         }
@@ -1024,7 +1021,7 @@ static bool AcceptToMemoryPoolWithTime(
     const Config &config, CTxMemPool &pool, CValidationState &state,
     const CTransactionRef &tx, bool fLimitFree, bool *pfMissingInputs,
     int64_t nAcceptTime, std::list<CTransactionRef> *plTxnReplaced = nullptr,
-    bool fOverrideMempoolLimit = false, const Amount nAbsurdFee = 0) {
+    bool fOverrideMempoolLimit = false, const Amount nAbsurdFee = Amount(0)) {
     std::vector<COutPoint> coins_to_uncache;
     bool res = AcceptToMemoryPoolWorker(
         config, pool, state, tx, fLimitFree, pfMissingInputs, nAcceptTime,
@@ -1159,10 +1156,8 @@ bool GetTransaction(const Config &config, const uint256 &txid,
     }
 
     if (pindexSlow) {
-        auto &params = config.GetChainParams().GetConsensus();
-
         CBlock block;
-        if (ReadBlockFromDisk(block, pindexSlow, params)) {
+        if (ReadBlockFromDisk(block, pindexSlow, config)) {
             for (const auto &tx : block.vtx) {
                 if (tx->GetId() == txid) {
                     txOut = tx;
@@ -1182,11 +1177,12 @@ bool GetTransaction(const Config &config, const uint256 &txid,
 //
 
 bool WriteBlockToDisk(const CBlock &block, CDiskBlockPos &pos,
-                      const CMessageHeader::MessageStartChars &messageStart) {
+                      const CMessageHeader::MessageMagic &messageStart) {
     // Open history file to append
     CAutoFile fileout(OpenBlockFile(pos), SER_DISK, CLIENT_VERSION);
-    if (fileout.IsNull())
+    if (fileout.IsNull()) {
         return error("WriteBlockToDisk: OpenBlockFile failed");
+    }
 
     // Write index header
     unsigned int nSize = GetSerializeSize(fileout, block);
@@ -1194,7 +1190,10 @@ bool WriteBlockToDisk(const CBlock &block, CDiskBlockPos &pos,
 
     // Write block
     long fileOutPos = ftell(fileout.Get());
-    if (fileOutPos < 0) return error("WriteBlockToDisk: ftell failed");
+    if (fileOutPos < 0) {
+        return error("WriteBlockToDisk: ftell failed");
+    }
+
     pos.nPos = (unsigned int)fileOutPos;
     fileout << block;
 
@@ -1202,14 +1201,15 @@ bool WriteBlockToDisk(const CBlock &block, CDiskBlockPos &pos,
 }
 
 bool ReadBlockFromDisk(CBlock &block, const CDiskBlockPos &pos,
-                       const Consensus::Params &consensusParams) {
+                       const Config &config) {
     block.SetNull();
 
     // Open history file to read
     CAutoFile filein(OpenBlockFile(pos, true), SER_DISK, CLIENT_VERSION);
-    if (filein.IsNull())
+    if (filein.IsNull()) {
         return error("ReadBlockFromDisk: OpenBlockFile failed for %s",
                      pos.ToString());
+    }
 
     // Read block
     try {
@@ -1220,28 +1220,33 @@ bool ReadBlockFromDisk(CBlock &block, const CDiskBlockPos &pos,
     }
 
     // Check the header
-    if (!CheckProofOfWork(block.GetHash(), block.nBits, consensusParams))
+    if (!CheckProofOfWork(block.GetHash(), block.nBits, config)) {
         return error("ReadBlockFromDisk: Errors in block header at %s",
                      pos.ToString());
+    }
 
     return true;
 }
 
 bool ReadBlockFromDisk(CBlock &block, const CBlockIndex *pindex,
-                       const Consensus::Params &consensusParams) {
-    if (!ReadBlockFromDisk(block, pindex->GetBlockPos(), consensusParams))
+                       const Config &config) {
+    if (!ReadBlockFromDisk(block, pindex->GetBlockPos(), config)) {
         return false;
-    if (block.GetHash() != pindex->GetBlockHash())
+    }
+
+    if (block.GetHash() != pindex->GetBlockHash()) {
         return error("ReadBlockFromDisk(CBlock&, CBlockIndex*): GetHash() "
                      "doesn't match index for %s at %s",
                      pindex->ToString(), pindex->GetBlockPos().ToString());
+    }
+
     return true;
 }
 
 Amount GetBlockSubsidy(int nHeight, const Consensus::Params &consensusParams) {
     int halvings = nHeight / consensusParams.nSubsidyHalvingInterval;
     // Force block reward to zero when right shift is undefined.
-    if (halvings >= 64) return 0;
+    if (halvings >= 64) return Amount(0);
 
     Amount nSubsidy = 50 * COIN;
     // Subsidy is cut in half every 210,000 blocks which will occur
@@ -1445,8 +1450,8 @@ bool CheckTxInputs(const CTransaction &tx, CValidationState &state,
         return state.Invalid(false, 0, "", "Inputs unavailable");
     }
 
-    Amount nValueIn = 0;
-    Amount nFees = 0;
+    Amount nValueIn(0);
+    Amount nFees(0);
     for (size_t i = 0; i < tx.vin.size(); i++) {
         const COutPoint &prevout = tx.vin[i].prevout;
         const Coin &coin = inputs.AccessCoin(prevout);
@@ -1464,7 +1469,7 @@ bool CheckTxInputs(const CTransaction &tx, CValidationState &state,
         }
 
         // Check for negative or overflow input values
-        nValueIn += coin.GetTxOut().nValue.GetSatoshis();
+        nValueIn += coin.GetTxOut().nValue;
         if (!MoneyRange(coin.GetTxOut().nValue) || !MoneyRange(nValueIn)) {
             return state.DoS(100, false, REJECT_INVALID,
                              "bad-txns-inputvalues-outofrange");
@@ -1472,15 +1477,15 @@ bool CheckTxInputs(const CTransaction &tx, CValidationState &state,
     }
 
     if (nValueIn < tx.GetValueOut()) {
-        return state.DoS(
-            100, false, REJECT_INVALID, "bad-txns-in-belowout", false,
-            strprintf("value in (%s) < value out (%s)", FormatMoney(nValueIn),
-                      FormatMoney(tx.GetValueOut().GetSatoshis())));
+        return state.DoS(100, false, REJECT_INVALID, "bad-txns-in-belowout",
+                         false, strprintf("value in (%s) < value out (%s)",
+                                          FormatMoney(nValueIn),
+                                          FormatMoney(tx.GetValueOut())));
     }
 
     // Tally transaction fees
     Amount nTxFee = nValueIn - tx.GetValueOut();
-    if (nTxFee < 0) {
+    if (nTxFee < Amount(0)) {
         return state.DoS(100, false, REJECT_INVALID, "bad-txns-fee-negative");
     }
     nFees += nTxFee;
@@ -1592,7 +1597,7 @@ namespace {
 
 bool UndoWriteToDisk(const CBlockUndo &blockundo, CDiskBlockPos &pos,
                      const uint256 &hashBlock,
-                     const CMessageHeader::MessageStartChars &messageStart) {
+                     const CMessageHeader::MessageMagic &messageStart) {
     // Open history file to append
     CAutoFile fileout(OpenUndoFile(pos), SER_DISK, CLIENT_VERSION);
     if (fileout.IsNull()) return error("%s: OpenUndoFile failed", __func__);
@@ -1935,19 +1940,21 @@ private:
 public:
     WarningBitsConditionChecker(int bitIn) : bit(bitIn) {}
 
-    int64_t BeginTime(const Consensus::Params &params) const { return 0; }
-    int64_t EndTime(const Consensus::Params &params) const {
+    int64_t BeginTime(const Consensus::Params &params) const override {
+        return 0;
+    }
+    int64_t EndTime(const Consensus::Params &params) const override {
         return std::numeric_limits<int64_t>::max();
     }
-    int Period(const Consensus::Params &params) const {
+    int Period(const Consensus::Params &params) const override {
         return params.nMinerConfirmationWindow;
     }
-    int Threshold(const Consensus::Params &params) const {
+    int Threshold(const Consensus::Params &params) const override {
         return params.nRuleChangeActivationThreshold;
     }
 
     bool Condition(const CBlockIndex *pindex,
-                   const Consensus::Params &params) const {
+                   const Consensus::Params &params) const override {
         return ((pindex->nVersion & VERSIONBITS_TOP_MASK) ==
                 VERSIONBITS_TOP_BITS) &&
                ((pindex->nVersion >> bit) & 1) != 0 &&
@@ -1995,11 +2002,11 @@ static uint32_t GetBlockScriptFlags(const CBlockIndex *pindex,
         flags |= SCRIPT_ENABLE_SIGHASH_FORKID;
     }
 
-    // If the Cash HF is enabled, we start rejecting transaction that use a high
+    // If the DAA HF is enabled, we start rejecting transaction that use a high
     // s in their signature. We also make sure that signature that are supposed
     // to fail (for instance in multisig or other forms of smart contracts) are
     // null.
-    if (IsCashHFEnabled(config, pindex->pprev)) {
+    if (IsDAAEnabled(config, pindex->pprev)) {
         flags |= SCRIPT_VERIFY_LOW_S;
         flags |= SCRIPT_VERIFY_NULLFAIL;
     }
@@ -2030,8 +2037,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
     int64_t nTimeStart = GetTimeMicros();
 
     // Check it again in case a previous version let a bad block in
-    if (!CheckBlock(config, block, state, chainparams.GetConsensus(),
-                    !fJustCheck, !fJustCheck)) {
+    if (!CheckBlock(config, block, state, !fJustCheck, !fJustCheck)) {
         return error("%s: Consensus::CheckBlock: %s", __func__,
                      FormatStateMessage(state));
     }
@@ -2169,7 +2175,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
                                                            : nullptr);
 
     std::vector<int> prevheights;
-    Amount nFees = 0;
+    Amount nFees(0);
     int nInputs = 0;
 
     // Sigops counting. We need to do it again because of P2SH.
@@ -2269,7 +2275,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
 
         if (!tx.IsCoinBase()) {
             Amount fee = view.GetValueIn(tx) - tx.GetValueOut();
-            nFees += fee.GetSatoshis();
+            nFees += fee;
 
             // Don't cache results if we're actually connecting blocks (still
             // consult the cache, though).
@@ -2372,7 +2378,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
                 return error("ConnectBlock(): FindUndoPos failed");
             }
             if (!UndoWriteToDisk(blockundo, _pos, pindex->pprev->GetBlockHash(),
-                                 chainparams.MessageStart())) {
+                                 chainparams.DiskMagic())) {
                 return AbortNode(state, "Failed to write undo data");
             }
 
@@ -2692,13 +2698,12 @@ static void UpdateTip(const Config &config, CBlockIndex *pindexNew) {
  */
 static bool DisconnectTip(const Config &config, CValidationState &state,
                           bool fBare = false) {
-    const Consensus::Params &consensusParams =
-        config.GetChainParams().GetConsensus();
     CBlockIndex *pindexDelete = chainActive.Tip();
     assert(pindexDelete);
+
     // Read block from disk.
     CBlock block;
-    if (!ReadBlockFromDisk(block, pindexDelete, consensusParams)) {
+    if (!ReadBlockFromDisk(block, pindexDelete, config)) {
         return AbortNode(state, "Failed to read block");
     }
 
@@ -2792,12 +2797,13 @@ static bool ConnectTip(const Config &config, CValidationState &state,
     if (!pblock) {
         std::shared_ptr<CBlock> pblockNew = std::make_shared<CBlock>();
         connectTrace.blocksConnected.emplace_back(pindexNew, pblockNew);
-        if (!ReadBlockFromDisk(*pblockNew, pindexNew,
-                               chainparams.GetConsensus()))
+        if (!ReadBlockFromDisk(*pblockNew, pindexNew, config)) {
             return AbortNode(state, "Failed to read block");
+        }
     } else {
         connectTrace.blocksConnected.emplace_back(pindexNew, pblock);
     }
+
     const CBlock &blockConnecting = *connectTrace.blocksConnected.back().second;
     // Apply the block atomically to the chain state.
     int64_t nTime2 = GetTimeMicros();
@@ -3004,7 +3010,8 @@ static bool ActivateBestChainStep(const Config &config, CValidationState &state,
     }
 
     if (fBlocksDisconnected) {
-        mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1,
+        mempool.removeForReorg(config, pcoinsTip,
+                               chainActive.Tip()->nHeight + 1,
                                STANDARD_LOCKTIME_VERIFY_FLAGS);
         LimitMempoolSize(
             mempool, GetArg("-maxmempool", DEFAULT_MAX_MEMPOOL_SIZE) * 1000000,
@@ -3190,7 +3197,8 @@ bool InvalidateBlock(const Config &config, CValidationState &state,
         // ActivateBestChain considers blocks already in chainActive
         // unconditionally valid already, so force disconnect away from it.
         if (!DisconnectTip(config, state)) {
-            mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1,
+            mempool.removeForReorg(config, pcoinsTip,
+                                   chainActive.Tip()->nHeight + 1,
                                    STANDARD_LOCKTIME_VERIFY_FLAGS);
             return false;
         }
@@ -3214,7 +3222,7 @@ bool InvalidateBlock(const Config &config, CValidationState &state,
     }
 
     InvalidChainFound(pindex);
-    mempool.removeForReorg(pcoinsTip, chainActive.Tip()->nHeight + 1,
+    mempool.removeForReorg(config, pcoinsTip, chainActive.Tip()->nHeight + 1,
                            STANDARD_LOCKTIME_VERIFY_FLAGS);
     uiInterface.NotifyBlockTip(IsInitialBlockDownload(), pindex->pprev);
     return true;
@@ -3455,21 +3463,19 @@ bool FindUndoPos(CValidationState &state, int nFile, CDiskBlockPos &pos,
     return true;
 }
 
-bool CheckBlockHeader(const CBlockHeader &block, CValidationState &state,
-                      const Consensus::Params &consensusParams,
-                      bool fCheckPOW) {
+static bool CheckBlockHeader(const Config &config, const CBlockHeader &block,
+                             CValidationState &state, bool fCheckPOW = true) {
     // Check proof of work matches claimed amount
-    if (fCheckPOW &&
-        !CheckProofOfWork(block.GetHash(), block.nBits, consensusParams))
+    if (fCheckPOW && !CheckProofOfWork(block.GetHash(), block.nBits, config)) {
         return state.DoS(50, false, REJECT_INVALID, "high-hash", false,
                          "proof of work failed");
+    }
 
     return true;
 }
 
 bool CheckBlock(const Config &config, const CBlock &block,
-                CValidationState &state,
-                const Consensus::Params &consensusParams, bool fCheckPOW,
+                CValidationState &state, bool fCheckPOW,
                 bool fCheckMerkleRoot) {
     // These are checks that are independent of context.
     if (block.fChecked) {
@@ -3478,7 +3484,7 @@ bool CheckBlock(const Config &config, const CBlock &block,
 
     // Check that the header is valid (particularly PoW).  This is mostly
     // redundant with the call in AcceptBlockHeader.
-    if (!CheckBlockHeader(block, state, consensusParams, fCheckPOW)) {
+    if (!CheckBlockHeader(config, block, state, fCheckPOW)) {
         return false;
     }
 
@@ -3603,16 +3609,19 @@ static bool CheckIndexAgainstCheckpoint(const CBlockIndex *pindexPrev,
     return true;
 }
 
-bool ContextualCheckBlockHeader(const CBlockHeader &block,
-                                CValidationState &state,
-                                const Consensus::Params &consensusParams,
-                                const CBlockIndex *pindexPrev,
-                                int64_t nAdjustedTime) {
+static bool ContextualCheckBlockHeader(const Config &config,
+                                       const CBlockHeader &block,
+                                       CValidationState &state,
+                                       const CBlockIndex *pindexPrev,
+                                       int64_t nAdjustedTime) {
+    const Consensus::Params &consensusParams =
+        config.GetChainParams().GetConsensus();
+
     const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
 
     // Check proof of work
-    if (block.nBits !=
-        GetNextWorkRequired(pindexPrev, &block, consensusParams)) {
+    if (block.nBits != GetNextWorkRequired(pindexPrev, &block, config)) {
+        LogPrintf("bad bits after height: %d\n", pindexPrev->nHeight);
         return state.DoS(100, false, REJECT_INVALID, "bad-diffbits", false,
                          "incorrect proof of work");
     }
@@ -3645,15 +3654,17 @@ bool ContextualCheckBlockHeader(const CBlockHeader &block,
 }
 
 bool ContextualCheckTransaction(const Config &config, const CTransaction &tx,
-                                CValidationState &state,
-                                const Consensus::Params &consensusParams,
-                                int nHeight, int64_t nLockTimeCutoff) {
+                                CValidationState &state, int nHeight,
+                                int64_t nLockTimeCutoff) {
     if (!IsFinalTx(tx, nHeight, nLockTimeCutoff)) {
         // While this is only one transaction, we use txns in the error to
         // ensure continuity with other clients.
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-nonfinal", false,
                          "non-final transaction");
     }
+
+    const Consensus::Params &consensusParams =
+        config.GetChainParams().GetConsensus();
 
     if (IsUAHFenabled(config, nHeight) &&
         nHeight <= consensusParams.antiReplayOpReturnSunsetHeight) {
@@ -3669,9 +3680,10 @@ bool ContextualCheckTransaction(const Config &config, const CTransaction &tx,
     return true;
 }
 
-bool ContextualCheckTransactionForCurrentBlock(
-    const Config &config, const CTransaction &tx, CValidationState &state,
-    const Consensus::Params &consensusParams, int flags) {
+bool ContextualCheckTransactionForCurrentBlock(const Config &config,
+                                               const CTransaction &tx,
+                                               CValidationState &state,
+                                               int flags) {
     AssertLockHeld(cs_main);
 
     // By convention a negative value for flags indicates that the current
@@ -3698,8 +3710,8 @@ bool ContextualCheckTransactionForCurrentBlock(
                                         ? chainActive.Tip()->GetMedianTimePast()
                                         : GetAdjustedTime();
 
-    return ContextualCheckTransaction(config, tx, state, consensusParams,
-                                      nBlockHeight, nLockTimeCutoff);
+    return ContextualCheckTransaction(config, tx, state, nBlockHeight,
+                                      nLockTimeCutoff);
 }
 
 bool ContextualCheckBlock(const Config &config, const CBlock &block,
@@ -3724,8 +3736,8 @@ bool ContextualCheckBlock(const Config &config, const CBlock &block,
 
     // Check that all transactions are finalized
     for (const auto &tx : block.vtx) {
-        if (!ContextualCheckTransaction(config, *tx, state, consensusParams,
-                                        nHeight, nLockTimeCutoff)) {
+        if (!ContextualCheckTransaction(config, *tx, state, nHeight,
+                                        nLockTimeCutoff)) {
             // state set by ContextualCheckTransaction.
             return false;
         }
@@ -3769,7 +3781,7 @@ static bool AcceptBlockHeader(const Config &config, const CBlockHeader &block,
             return true;
         }
 
-        if (!CheckBlockHeader(block, state, chainparams.GetConsensus())) {
+        if (!CheckBlockHeader(config, block, state)) {
             return error("%s: Consensus::CheckBlockHeader: %s, %s", __func__,
                          hash.ToString(), FormatStateMessage(state));
         }
@@ -3795,8 +3807,7 @@ static bool AcceptBlockHeader(const Config &config, const CBlockHeader &block,
                          state.GetRejectReason().c_str());
         }
 
-        if (!ContextualCheckBlockHeader(block, state,
-                                        chainparams.GetConsensus(), pindexPrev,
+        if (!ContextualCheckBlockHeader(config, block, state, pindexPrev,
                                         GetAdjustedTime())) {
             return error("%s: Consensus::ContextualCheckBlockHeader: %s, %s",
                          __func__, hash.ToString(), FormatStateMessage(state));
@@ -3911,7 +3922,7 @@ static bool AcceptBlock(const Config &config,
     }
 
     const CChainParams &chainparams = config.GetChainParams();
-    if (!CheckBlock(config, block, state, chainparams.GetConsensus()) ||
+    if (!CheckBlock(config, block, state) ||
         !ContextualCheckBlock(config, block, state, chainparams.GetConsensus(),
                               pindex->pprev)) {
         if (state.IsInvalid() && !state.CorruptionPossible()) {
@@ -3944,8 +3955,7 @@ static bool AcceptBlock(const Config &config,
             return error("AcceptBlock(): FindBlockPos failed");
         }
         if (dbp == nullptr) {
-            if (!WriteBlockToDisk(block, blockPos,
-                                  chainparams.MessageStart())) {
+            if (!WriteBlockToDisk(block, blockPos, chainparams.DiskMagic())) {
                 AbortNode(state, "Failed to write block");
             }
         }
@@ -3976,8 +3986,7 @@ bool ProcessNewBlock(const Config &config,
         CValidationState state;
         // Ensure that CheckBlock() passes before calling AcceptBlock, as
         // belt-and-suspenders.
-        bool ret =
-            CheckBlock(config, *pblock, state, chainparams.GetConsensus());
+        bool ret = CheckBlock(config, *pblock, state);
 
         LOCK(cs_main);
 
@@ -4004,10 +4013,11 @@ bool ProcessNewBlock(const Config &config,
 }
 
 bool TestBlockValidity(const Config &config, CValidationState &state,
-                       const CChainParams &chainparams, const CBlock &block,
-                       CBlockIndex *pindexPrev, bool fCheckPOW,
-                       bool fCheckMerkleRoot) {
+                       const CBlock &block, CBlockIndex *pindexPrev,
+                       bool fCheckPOW, bool fCheckMerkleRoot) {
     AssertLockHeld(cs_main);
+    const CChainParams &chainparams = config.GetChainParams();
+
     assert(pindexPrev && pindexPrev == chainActive.Tip());
     if (fCheckpointsEnabled &&
         !CheckIndexAgainstCheckpoint(pindexPrev, state, chainparams,
@@ -4022,13 +4032,12 @@ bool TestBlockValidity(const Config &config, CValidationState &state,
     indexDummy.nHeight = pindexPrev->nHeight + 1;
 
     // NOTE: CheckBlockHeader is called by CheckBlock
-    if (!ContextualCheckBlockHeader(block, state, chainparams.GetConsensus(),
-                                    pindexPrev, GetAdjustedTime())) {
+    if (!ContextualCheckBlockHeader(config, block, state, pindexPrev,
+                                    GetAdjustedTime())) {
         return error("%s: Consensus::ContextualCheckBlockHeader: %s", __func__,
                      FormatStateMessage(state));
     }
-    if (!CheckBlock(config, block, state, chainparams.GetConsensus(), fCheckPOW,
-                    fCheckMerkleRoot)) {
+    if (!CheckBlock(config, block, state, fCheckPOW, fCheckMerkleRoot)) {
         return error("%s: Consensus::CheckBlock: %s", __func__,
                      FormatStateMessage(state));
     }
@@ -4408,9 +4417,8 @@ CVerifyDB::~CVerifyDB() {
     uiInterface.ShowProgress("", 100);
 }
 
-bool CVerifyDB::VerifyDB(const Config &config, const CChainParams &chainparams,
-                         CCoinsView *coinsview, int nCheckLevel,
-                         int nCheckDepth) {
+bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
+                         int nCheckLevel, int nCheckDepth) {
     LOCK(cs_main);
     if (chainActive.Tip() == nullptr || chainActive.Tip()->pprev == nullptr) {
         return true;
@@ -4421,12 +4429,17 @@ bool CVerifyDB::VerifyDB(const Config &config, const CChainParams &chainparams,
         // suffices until the year 19000
         nCheckDepth = 1000000000;
     }
+
     if (nCheckDepth > chainActive.Height()) {
         nCheckDepth = chainActive.Height();
     }
+
     nCheckLevel = std::max(0, std::min(4, nCheckLevel));
     LogPrintf("Verifying last %i blocks at level %i\n", nCheckDepth,
               nCheckLevel);
+
+    const CChainParams &chainparams = config.GetChainParams();
+
     CCoinsViewCache coins(coinsview);
     CBlockIndex *pindexState = chainActive.Tip();
     CBlockIndex *pindexFailure = nullptr;
@@ -4461,18 +4474,18 @@ bool CVerifyDB::VerifyDB(const Config &config, const CChainParams &chainparams,
                       pindex->nHeight);
             break;
         }
+
         CBlock block;
 
         // check level 0: read from disk
-        if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus())) {
+        if (!ReadBlockFromDisk(block, pindex, config)) {
             return error(
                 "VerifyDB(): *** ReadBlockFromDisk failed at %d, hash=%s",
                 pindex->nHeight, pindex->GetBlockHash().ToString());
         }
 
         // check level 1: verify block validity
-        if (nCheckLevel >= 1 &&
-            !CheckBlock(config, block, state, chainparams.GetConsensus())) {
+        if (nCheckLevel >= 1 && !CheckBlock(config, block, state)) {
             return error("%s: *** found bad block at %d, hash=%s (%s)\n",
                          __func__, pindex->nHeight,
                          pindex->GetBlockHash().ToString(),
@@ -4543,7 +4556,7 @@ bool CVerifyDB::VerifyDB(const Config &config, const CChainParams &chainparams,
                                                 (double)nCheckDepth * 50))));
             pindex = chainActive.Next(pindex);
             CBlock block;
-            if (!ReadBlockFromDisk(block, pindex, chainparams.GetConsensus())) {
+            if (!ReadBlockFromDisk(block, pindex, config)) {
                 return error(
                     "VerifyDB(): *** ReadBlockFromDisk failed at %d, hash=%s",
                     pindex->nHeight, pindex->GetBlockHash().ToString());
@@ -4566,7 +4579,7 @@ bool CVerifyDB::VerifyDB(const Config &config, const CChainParams &chainparams,
     return true;
 }
 
-bool RewindBlockIndex(const Config &config, const CChainParams &params) {
+bool RewindBlockIndex(const Config &config) {
     LOCK(cs_main);
 
     int nHeight = chainActive.Height() + 1;
@@ -4610,7 +4623,7 @@ bool RewindBlockIndex(const Config &config, const CChainParams &params) {
 
     PruneBlockIndexCandidates();
 
-    CheckBlockIndex(params.GetConsensus());
+    CheckBlockIndex(config.GetChainParams().GetConsensus());
 
     if (!FlushStateToDisk(state, FLUSH_STATE_ALWAYS)) {
         return false;
@@ -4699,8 +4712,7 @@ bool InitBlockIndex(const Config &config) {
                               block.GetBlockTime())) {
                 return error("LoadBlockIndex(): FindBlockPos failed");
             }
-            if (!WriteBlockToDisk(block, blockPos,
-                                  chainparams.MessageStart())) {
+            if (!WriteBlockToDisk(block, blockPos, chainparams.DiskMagic())) {
                 return error(
                     "LoadBlockIndex(): writing genesis block to disk failed");
             }
@@ -4750,10 +4762,10 @@ bool LoadExternalBlockFile(const Config &config, FILE *fileIn,
             try {
                 // Locate a header.
                 uint8_t buf[CMessageHeader::MESSAGE_START_SIZE];
-                blkdat.FindByte(chainparams.MessageStart()[0]);
+                blkdat.FindByte(chainparams.DiskMagic()[0]);
                 nRewind = blkdat.GetPos() + 1;
                 blkdat >> FLATDATA(buf);
-                if (memcmp(buf, chainparams.MessageStart(),
+                if (memcmp(buf, std::begin(chainparams.DiskMagic()),
                            CMessageHeader::MESSAGE_START_SIZE)) {
                     continue;
                 }
@@ -4843,7 +4855,7 @@ bool LoadExternalBlockFile(const Config &config, FILE *fileIn,
                         std::shared_ptr<CBlock> pblockrecursive =
                             std::make_shared<CBlock>();
                         if (ReadBlockFromDisk(*pblockrecursive, it->second,
-                                              chainparams.GetConsensus())) {
+                                              config)) {
                             LogPrint(
                                 "reindex",
                                 "%s: Processing out of order child %s of %s\n",
@@ -5242,8 +5254,8 @@ bool LoadMempool(const Config &config) {
             file >> nTime;
             file >> nFeeDelta;
 
-            Amount amountdelta = nFeeDelta;
-            if (amountdelta != 0) {
+            Amount amountdelta(nFeeDelta);
+            if (amountdelta != Amount(0)) {
                 mempool.PrioritiseTransaction(tx->GetId(),
                                               tx->GetId().ToString(),
                                               prioritydummy, amountdelta);
@@ -5292,7 +5304,7 @@ void DumpMempool(void) {
     {
         LOCK(mempool.cs);
         for (const auto &i : mempool.mapDeltas) {
-            mapDeltas[i.first] = i.second.second.GetSatoshis();
+            mapDeltas[i.first] = i.second.second;
         }
         vinfo = mempool.infoAll();
     }

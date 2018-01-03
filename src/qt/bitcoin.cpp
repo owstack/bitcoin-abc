@@ -83,6 +83,8 @@ Q_IMPORT_PLUGIN(QCocoaIntegrationPlugin);
 // Declare meta types used for QMetaObject::invokeMethod
 Q_DECLARE_METATYPE(bool *)
 Q_DECLARE_METATYPE(CAmount)
+Q_DECLARE_METATYPE(Amount)
+
 // Config is non-copyable so we can only register pointers to it
 Q_DECLARE_METATYPE(Config *)
 
@@ -94,7 +96,7 @@ static void InitMessage(const std::string &message) {
  * Translate string to current locale using Qt.
  */
 static std::string Translate(const char *psz) {
-    return QCoreApplication::translate("bitcoin-core", psz).toStdString();
+    return QCoreApplication::translate("bitcoin-abc", psz).toStdString();
 }
 
 static QString GetLangTerritory() {
@@ -174,13 +176,14 @@ void DebugMessageHandler(QtMsgType type, const QMessageLogContext &context,
 }
 #endif
 
-/** Class encapsulating Bitcoin Core startup and shutdown.
+/**
+ * Class encapsulating Bitcoin ABC startup and shutdown.
  * Allows running startup and shutdown in a different thread from the UI thread.
  */
-class BitcoinCore : public QObject {
+class BitcoinABC : public QObject {
     Q_OBJECT
 public:
-    explicit BitcoinCore();
+    explicit BitcoinABC();
 
 public Q_SLOTS:
     void initialize(Config *config);
@@ -215,7 +218,7 @@ public:
     /// Create options model
     void createOptionsModel(bool resetSettings);
     /// Create main window
-    void createWindow(const NetworkStyle *networkStyle);
+    void createWindow(const Config *, const NetworkStyle *networkStyle);
     /// Create splash screen
     void createSplashScreen(const NetworkStyle *networkStyle);
 
@@ -262,14 +265,14 @@ private:
 
 #include "bitcoin.moc"
 
-BitcoinCore::BitcoinCore() : QObject() {}
+BitcoinABC::BitcoinABC() : QObject() {}
 
-void BitcoinCore::handleRunawayException(const std::exception *e) {
+void BitcoinABC::handleRunawayException(const std::exception *e) {
     PrintExceptionContinue(e, "Runaway exception");
     Q_EMIT runawayException(QString::fromStdString(GetWarnings("gui")));
 }
 
-void BitcoinCore::initialize(Config *cfg) {
+void BitcoinABC::initialize(Config *cfg) {
     Config &config(*cfg);
     try {
         qDebug() << __func__ << ": Running AppInit2 in thread";
@@ -297,7 +300,7 @@ void BitcoinCore::initialize(Config *cfg) {
     }
 }
 
-void BitcoinCore::shutdown() {
+void BitcoinABC::shutdown() {
     try {
         qDebug() << __func__ << ": Running Shutdown in thread";
         Interrupt(threadGroup);
@@ -363,8 +366,9 @@ void BitcoinApplication::createOptionsModel(bool resetSettings) {
     optionsModel = new OptionsModel(nullptr, resetSettings);
 }
 
-void BitcoinApplication::createWindow(const NetworkStyle *networkStyle) {
-    window = new BitcoinGUI(platformStyle, networkStyle, 0);
+void BitcoinApplication::createWindow(const Config *config,
+                                      const NetworkStyle *networkStyle) {
+    window = new BitcoinGUI(config, platformStyle, networkStyle, 0);
 
     pollShutdownTimer = new QTimer(window);
     connect(pollShutdownTimer, SIGNAL(timeout()), window,
@@ -386,7 +390,7 @@ void BitcoinApplication::createSplashScreen(const NetworkStyle *networkStyle) {
 void BitcoinApplication::startThread() {
     if (coreThread) return;
     coreThread = new QThread(this);
-    BitcoinCore *executor = new BitcoinCore();
+    BitcoinABC *executor = new BitcoinABC();
     executor->moveToThread(coreThread);
 
     /*  communication to and from thread */
@@ -620,10 +624,10 @@ int main(int argc, char *argv[]) {
 
     // Register meta types used for QMetaObject::invokeMethod
     qRegisterMetaType<bool *>();
-    //   Need to pass name here as CAmount is a typedef (see
+    //   Need to pass name here as Amount is a typedef (see
     //   http://qt-project.org/doc/qt-5/qmetatype.html#qRegisterMetaType)
     //   IMPORTANT if it is no longer a typedef use the normal variant above
-    qRegisterMetaType<CAmount>("CAmount");
+    qRegisterMetaType<Amount>("Amount");
 
     // Need to register any types Qt doesn't know about if you intend
     // to use them with the signal/slot mechanism Qt provides. Even pointers.
@@ -772,7 +776,7 @@ int main(int argc, char *argv[]) {
         app.createSplashScreen(networkStyle.data());
 
     try {
-        app.createWindow(networkStyle.data());
+        app.createWindow(&config, networkStyle.data());
         app.requestInitialize(config);
 #if defined(Q_OS_WIN) && QT_VERSION >= 0x050000
         WinShutdownMonitor::registerShutdownBlockReason(

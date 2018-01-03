@@ -7,11 +7,13 @@
 #define BITCOIN_CHAIN_H
 
 #include "arith_uint256.h"
+#include "consensus/params.h"
 #include "pow.h"
 #include "primitives/block.h"
 #include "tinyformat.h"
 #include "uint256.h"
 
+#include <unordered_map>
 #include <vector>
 
 class CBlockFileInfo {
@@ -291,9 +293,9 @@ public:
 
     uint256 GetBlockHash() const { return *phashBlock; }
 
-    int64_t GetBlockTime() const { return (int64_t)nTime; }
+    int64_t GetBlockTime() const { return int64_t(nTime); }
 
-    int64_t GetBlockTimeMax() const { return (int64_t)nTimeMax; }
+    int64_t GetBlockTimeMax() const { return int64_t(nTimeMax); }
 
     enum { nMedianTimeSpan = 11 };
 
@@ -351,6 +353,16 @@ public:
     CBlockIndex *GetAncestor(int height);
     const CBlockIndex *GetAncestor(int height) const;
 };
+
+/**
+ * Maintain a map of CBlockIndex for all known headers.
+ */
+struct BlockHasher {
+    size_t operator()(const uint256 &hash) const { return hash.GetCheapHash(); }
+};
+
+typedef std::unordered_map<uint256, CBlockIndex *, BlockHasher> BlockMap;
+extern BlockMap mapBlockIndex;
 
 arith_uint256 GetBlockProof(const CBlockIndex &block);
 
@@ -426,7 +438,9 @@ public:
     }
 };
 
-/** An in-memory indexed chain of blocks. */
+/**
+ * An in-memory indexed chain of blocks.
+ */
 class CChain {
 private:
     std::vector<CBlockIndex *> vChain;

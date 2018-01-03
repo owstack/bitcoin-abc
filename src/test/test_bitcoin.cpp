@@ -26,20 +26,18 @@
 
 #include "test/testutil.h"
 
-#include <cstdio>
-#include <iostream>
+#include <boost/filesystem.hpp>
+#include <boost/test/unit_test.hpp>
+#include <boost/thread.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <functional>
 #include <list>
 #include <memory>
 #include <thread>
-
-#include <boost/filesystem.hpp>
-#include <boost/test/unit_test.hpp>
-#include <boost/thread.hpp>
 
 std::unique_ptr<CConnman> g_connman;
 uint256 insecure_rand_seed = GetRandHash();
@@ -149,8 +147,7 @@ CBlock TestChain100Setup::CreateAndProcessBlock(
     unsigned int extraNonce = 0;
     IncrementExtraNonce(config, &block, chainActive.Tip(), extraNonce);
 
-    while (!CheckProofOfWork(block.GetHash(), block.nBits,
-                             chainparams.GetConsensus())) {
+    while (!CheckProofOfWork(block.GetHash(), block.nBits, config)) {
         ++block.nNonce;
     }
 
@@ -178,8 +175,8 @@ CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CTransaction &txn,
         pool && pool->HasNoInputsOf(txn) ? txn.GetValueOut() : Amount(0);
 
     return CTxMemPoolEntry(MakeTransactionRef(txn), nFee, nTime, dPriority,
-                           nHeight, inChainValue.GetSatoshis(), spendsCoinbase,
-                           sigOpCost, lp);
+                           nHeight, inChainValue, spendsCoinbase, sigOpCost,
+                           lp);
 }
 
 void Shutdown(void *parg) {

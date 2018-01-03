@@ -564,7 +564,7 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const {
                 case ToAddress:
                     return formatTxToAddress(rec, true);
                 case Amount:
-                    return qint64(rec->credit + rec->debit);
+                    return qint64((rec->credit + rec->debit).GetSatoshis());
             }
             break;
         case Qt::ToolTipRole:
@@ -581,7 +581,8 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const {
                 rec->status.status != TransactionStatus::Immature) {
                 return COLOR_UNCONFIRMED;
             }
-            if (index.column() == Amount && (rec->credit + rec->debit) < 0) {
+            if (index.column() == Amount &&
+                (rec->credit + rec->debit) < ::Amount(0)) {
                 return COLOR_NEGATIVE;
             }
             if (index.column() == ToAddress) {
@@ -605,7 +606,7 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const {
             return walletModel->getAddressTableModel()->labelForAddress(
                 QString::fromStdString(rec->address));
         case AmountRole:
-            return qint64(rec->credit + rec->debit);
+            return qint64((rec->credit + rec->debit).GetSatoshis());
         case TxIDRole:
             return rec->getTxID();
         case TxHashRole:

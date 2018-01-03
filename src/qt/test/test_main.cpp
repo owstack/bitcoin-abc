@@ -6,8 +6,10 @@
 #include "config/bitcoin-config.h"
 #endif
 
+#include "bitcoinaddressvalidatortests.h"
 #include "chainparams.h"
 #include "compattests.h"
+#include "guiutiltests.h"
 #include "key.h"
 #include "rpcnestedtests.h"
 #include "uritests.h"
@@ -48,6 +50,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
     app.setApplicationName("BitcoinABC-Qt-test");
 
+    // This is necessary to initialize openssl on the test framework
+    // (at least on Darwin).
     SSL_library_init();
 
     URITests test1;
@@ -60,6 +64,10 @@ int main(int argc, char *argv[]) {
     if (QTest::qExec(&test3) != 0) fInvalid = true;
     CompatTests test4;
     if (QTest::qExec(&test4) != 0) fInvalid = true;
+    GUIUtilTests test5;
+    if (QTest::qExec(&test5) != 0) fInvalid = true;
+    BitcoinAddressValidatorTests test6;
+    if (QTest::qExec(&test6) != 0) fInvalid = true;
 
     ECC_Stop();
     return fInvalid;
