@@ -94,6 +94,11 @@ BASE_SCRIPTS = [
     'abc-p2p-fullblocktest.py',
     'abc-rpc.py',
     'mempool-accept-txn.py',
+    # bitcore tests
+    'addressindex.py',
+    'spentindex.py',
+    'timestampindex.py',
+    'txindex.py',
 ]
 
 ZMQ_SCRIPTS = [
