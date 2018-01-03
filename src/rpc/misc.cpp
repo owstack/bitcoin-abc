@@ -598,7 +598,12 @@ bool getAddressFromIndex(const int &type, const uint160 &hash, std::string &addr
 bool getAddressesFromParams(const UniValue& params, std::vector<std::pair<uint160, int> > &addresses)
 {
     if (params[0].isStr()) {
-        CBitcoinAddress address(params[0].get_str());
+        CTxDestination dest = DecodeDestination(params[0].get_str());
+        bool isValid = IsValidDestination(dest);
+        if (!isValid) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+        }
+        CBitcoinAddress address(EncodeLegacyAddr(dest, Params()));
         uint160 hashBytes;
         int type = 0;
         if (!address.GetIndexKey(hashBytes, type)) {
@@ -616,7 +621,12 @@ bool getAddressesFromParams(const UniValue& params, std::vector<std::pair<uint16
 
         for (std::vector<UniValue>::iterator it = values.begin(); it != values.end(); ++it) {
 
-            CBitcoinAddress address(it->get_str());
+            CTxDestination dest = DecodeDestination(it->get_str());
+            bool isValid = IsValidDestination(dest);
+            if (!isValid) {
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+            }
+            CBitcoinAddress address(EncodeLegacyAddr(dest, Params()));
             uint160 hashBytes;
             int type = 0;
             if (!address.GetIndexKey(hashBytes, type)) {
