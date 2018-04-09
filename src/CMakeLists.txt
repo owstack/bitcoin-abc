@@ -7,6 +7,7 @@ option(BUILD_BITCOIN_ZMQ "Activate the ZeroMQ functionalities" ON)
 option(BUILD_BITCOIN_SEEDER "Build bitcoin-seeder" ON)
 option(BUILD_BITCOIN_CLI "Build bitcoin-cli" ON)
 option(BUILD_BITCOIN_TX "Build bitcoin-tx" ON)
+option(BUILD_BITCOIN_QT "Build bitcoin-qt" ON)
 
 # Ensure that WINDRES_PREPROC is enabled when using windres.
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
@@ -56,6 +57,7 @@ add_library(util
 	compat/glibc_sanity.cpp
 	compat/glibcxx_sanity.cpp
 	compat/strnlen.cpp
+	fs.cpp
 	random.cpp
 	rpc/protocol.cpp
 	support/cleanse.cpp
@@ -74,9 +76,7 @@ target_include_directories(util
 	PUBLIC
 		.
 		# To access the config.
-		# TODO: Make compat its own lib and just import it.
 		${CMAKE_CURRENT_BINARY_DIR}
-		${CMAKE_CURRENT_BINARY_DIR}/config
 )
 
 # Dependencies
@@ -106,7 +106,7 @@ endfunction(prepend)
 
 prepend(BOOST_LIBRARIES "Boost::" ${BOOST_PACKAGES_REQUIRED})
 
-find_package(Boost 1.55 REQUIRED ${BOOST_PACKAGES_REQUIRED})
+find_package(Boost 1.58 REQUIRED ${BOOST_PACKAGES_REQUIRED})
 target_link_libraries(util univalue crypto ${BOOST_LIBRARIES})
 
 # More completely unrelated features shared by all executables.
@@ -218,6 +218,22 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 	target_link_libraries(server ${EVENT_PTHREAD_LIBRARY})
 endif()
 
+# Wallet
+if(BUILD_BITCOIN_WALLET)
+	add_subdirectory(wallet)
+	target_link_libraries(server wallet)
+endif()
+
+# ZeroMQ
+if(BUILD_BITCOIN_ZMQ)
+	add_subdirectory(zmq)
+	target_link_libraries(server zmq)
+endif()
+
+# RPC client support
+add_library(rpcclient rpc/client.cpp)
+target_link_libraries(rpcclient univalue util)
+
 # bitcoin-seeder
 if(BUILD_BITCOIN_SEEDER)
 	add_subdirectory(seeder)
@@ -225,13 +241,13 @@ endif()
 
 # bitcoin-cli
 if(BUILD_BITCOIN_CLI)
-	add_executable(bitcoin-cli bitcoin-cli.cpp rpc/client.cpp)
+	add_executable(bitcoin-cli bitcoin-cli.cpp)
 	if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 		target_sources(bitcoin-cli PRIVATE bitcoin-cli-res.rc)
 	endif()
 
 	target_include_directories(bitcoin-cli PRIVATE ${EVENT_INCLUDE_DIR})
-	target_link_libraries(bitcoin-cli common ${EVENT_LIBRARY})
+	target_link_libraries(bitcoin-cli common rpcclient ${EVENT_LIBRARY})
 endif()
 
 # bitcoin-tx
@@ -251,14 +267,10 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 	target_sources(bitcoind PRIVATE bitcoind-res.rc)
 endif()
 
-# Wallet
-if(BUILD_BITCOIN_WALLET)
-	add_subdirectory(wallet)
-	target_link_libraries(bitcoind wallet)
-endif()
+# Test suite.
+add_subdirectory(test)
 
-# ZeroMQ
-if(BUILD_BITCOIN_ZMQ)
-	add_subdirectory(zmq)
-	target_link_libraries(bitcoind zmq)
+# Bitcoin-qt
+if(BUILD_BITCOIN_QT)
+	add_subdirectory(qt)
 endif()

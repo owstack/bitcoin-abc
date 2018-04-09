@@ -127,7 +127,7 @@ void PaymentServer::LoadRootCAs(X509_STORE *_store) {
     // -rootcertificates="" and get 'I don't like X.509 certificates, don't
     // trust anybody' behavior:
     QString certFile =
-        QString::fromStdString(GetArg("-rootcertificates", "-system-"));
+        QString::fromStdString(gArgs.GetArg("-rootcertificates", "-system-"));
 
     // Empty store
     if (certFile.isEmpty()) {
@@ -218,16 +218,16 @@ static std::string ipcParseURI(const QString &arg, const CChainParams &params,
 
 static bool ipcCanParseCashAddrURI(const QString &arg,
                                    const std::string &network) {
-    const CChainParams &params(Params(network));
-    std::string addr = ipcParseURI(arg, params, true);
-    return IsValidDestinationString(addr, params);
+    auto tempChainParams = CreateChainParams(network);
+    std::string addr = ipcParseURI(arg, *tempChainParams, true);
+    return IsValidDestinationString(addr, *tempChainParams);
 }
 
 static bool ipcCanParseLegacyURI(const QString &arg,
                                  const std::string &network) {
-    const CChainParams &params(Params(network));
-    std::string addr = ipcParseURI(arg, params, false);
-    return IsValidDestinationString(addr, params);
+    auto tempChainParams = CreateChainParams(network);
+    std::string addr = ipcParseURI(arg, *tempChainParams, false);
+    return IsValidDestinationString(addr, *tempChainParams);
 }
 
 //

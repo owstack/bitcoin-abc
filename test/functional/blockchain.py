@@ -3,44 +3,80 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#
-# Test RPC calls related to blockchain state. Tests correspond to code in
-# rpc/blockchain.cpp.
-#
+"""Test RPCs related to blockchainstate.
+
+Test the following RPCs:
+    - gettxoutsetinfo
+    - getdifficulty
+    - getbestblockhash
+    - getblockhash
+    - getblockheader
+    - getchaintxstats
+    - getnetworkhashps
+    - verifychain
+
+Tests correspond to code in rpc/blockchain.cpp.
+"""
 
 from decimal import Decimal
+import http.client
+import subprocess
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.authproxy import JSONRPCException
 from test_framework.util import (
     assert_equal,
     assert_raises,
+    assert_raises_rpc_error,
     assert_is_hex_string,
     assert_is_hash_string,
-    start_nodes,
-    connect_nodes_bi,
 )
 
 
 class BlockchainTest(BitcoinTestFramework):
-
-    """
-    Test blockchain-related RPC calls:
-
-        - gettxoutsetinfo
-        - verifychain
-
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.setup_clean_chain = False
+    def set_test_params(self):
         self.num_nodes = 1
+        self.extra_args = [['-stopatheight=207']]
 
     def run_test(self):
+        self._test_getchaintxstats()
         self._test_gettxoutsetinfo()
         self._test_getblockheader()
-        self.nodes[0].verifychain(4, 0)
+        self._test_getdifficulty()
+        self._test_getnetworkhashps()
+        self._test_stopatheight()
+        assert self.nodes[0].verifychain(4, 0)
+
+    def _test_getchaintxstats(self):
+        chaintxstats = self.nodes[0].getchaintxstats(1)
+        # 200 txs plus genesis tx
+        assert_equal(chaintxstats['txcount'], 201)
+        # tx rate should be 1 per 10 minutes, or 1/600
+        # we have to round because of binary math
+        assert_equal(round(chaintxstats['txrate'] * 600, 10), Decimal(1))
+
+        b1 = self.nodes[0].getblock(self.nodes[0].getblockhash(1))
+        b200 = self.nodes[0].getblock(self.nodes[0].getblockhash(200))
+        time_diff = b200['mediantime'] - b1['mediantime']
+
+        chaintxstats = self.nodes[0].getchaintxstats()
+        assert_equal(chaintxstats['time'], b200['time'])
+        assert_equal(chaintxstats['txcount'], 201)
+        assert_equal(chaintxstats['window_block_count'], 199)
+        assert_equal(chaintxstats['window_tx_count'], 199)
+        assert_equal(chaintxstats['window_interval'], time_diff)
+        assert_equal(
+            round(chaintxstats['txrate'] * time_diff, 10), Decimal(199))
+
+        chaintxstats = self.nodes[0].getchaintxstats(blockhash=b1['hash'])
+        assert_equal(chaintxstats['time'], b1['time'])
+        assert_equal(chaintxstats['txcount'], 2)
+        assert_equal(chaintxstats['window_block_count'], 0)
+        assert('window_tx_count' not in chaintxstats)
+        assert('window_interval' not in chaintxstats)
+        assert('txrate' not in chaintxstats)
+
+        assert_raises_rpc_error(-8, "Invalid block count: should be between 0 and the block's height - 1",
+                                self.nodes[0].getchaintxstats, 201)
 
     def _test_gettxoutsetinfo(self):
         node = self.nodes[0]
@@ -88,8 +124,8 @@ class BlockchainTest(BitcoinTestFramework):
     def _test_getblockheader(self):
         node = self.nodes[0]
 
-        assert_raises(
-            JSONRPCException, lambda: node.getblockheader('nonsense'))
+        assert_raises_rpc_error(-5, "Block not found",
+                                node.getblockheader, "nonsense")
 
         besthash = node.getbestblockhash()
         secondbesthash = node.getblockhash(199)
@@ -110,6 +146,33 @@ class BlockchainTest(BitcoinTestFramework):
         assert isinstance(header['version'], int)
         assert isinstance(int(header['versionHex'], 16), int)
         assert isinstance(header['difficulty'], Decimal)
+
+    def _test_getdifficulty(self):
+        difficulty = self.nodes[0].getdifficulty()
+        # 1 hash in 2 should be valid, so difficulty should be 1/2**31
+        # binary => decimal => binary math is why we do this check
+        assert abs(difficulty * 2**31 - 1) < 0.0001
+
+    def _test_getnetworkhashps(self):
+        hashes_per_second = self.nodes[0].getnetworkhashps()
+        # This should be 2 hashes every 10 minutes or 1/300
+        assert abs(hashes_per_second * 300 - 1) < 0.0001
+
+    def _test_stopatheight(self):
+        assert_equal(self.nodes[0].getblockcount(), 200)
+        self.nodes[0].generate(6)
+        assert_equal(self.nodes[0].getblockcount(), 206)
+        self.log.debug('Node should not stop at this height')
+        assert_raises(subprocess.TimeoutExpired,
+                      lambda: self.nodes[0].process.wait(timeout=3))
+        try:
+            self.nodes[0].generate(1)
+        except (ConnectionError, http.client.BadStatusLine):
+            pass  # The node already shut down before response
+        self.log.debug('Node should stop at this height...')
+        self.nodes[0].wait_until_stopped()
+        self.start_node(0)
+        assert_equal(self.nodes[0].getblockcount(), 207)
 
 
 if __name__ == '__main__':

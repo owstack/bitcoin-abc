@@ -11,6 +11,7 @@ add_library(crypto
 	ripemd160.cpp
 	sha1.cpp
 	sha256.cpp
+	sha256_sse4.cpp
 	sha512.cpp
 )
 
@@ -19,9 +20,7 @@ target_include_directories(crypto
 		..
 	PUBLIC
 		# To access the config.
-		# TODO: Make compat its own lib and just import it.
 		${CMAKE_CURRENT_BINARY_DIR}/..
-		${CMAKE_CURRENT_BINARY_DIR}/../config
 )
 
 target_compile_definitions(crypto PUBLIC HAVE_CONFIG_H)

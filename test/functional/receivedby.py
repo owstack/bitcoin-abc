@@ -26,16 +26,9 @@ def get_sub_array_from_array(object_array, to_match):
 
 
 class ReceivedByTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
-        self.num_nodes = 4
-        self.setup_clean_chain = False
-
-    def setup_nodes(self):
-        # This test requires mocktime
-        enable_mocktime()
-        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir)
+    def set_test_params(self):
+        self.num_nodes = 2
+        self.enable_mocktime()
 
     def run_test(self):
         '''
@@ -159,6 +152,7 @@ class ReceivedByTest(BitcoinTestFramework):
         if balance != Decimal("0.0"):
             raise AssertionError(
                 "Wrong balance returned by getreceivedbyaccount, %0.2f" % (balance))
+
 
 if __name__ == '__main__':
     ReceivedByTest().main()

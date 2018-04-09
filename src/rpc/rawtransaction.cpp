@@ -27,6 +27,7 @@
 #include "utilstrencodings.h"
 #include "validation.h"
 #ifdef ENABLE_WALLET
+#include "wallet/rpcwallet.h"
 #include "wallet/wallet.h"
 #endif
 
@@ -435,10 +436,14 @@ static UniValue gettxoutproof(const Config &config,
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Block not found");
         pblockindex = mapBlockIndex[hashBlock];
     } else {
-        const Coin &coin = AccessByTxid(*pcoinsTip, oneTxid);
-        if (!coin.IsSpent() && coin.GetHeight() > 0 &&
-            int64_t(coin.GetHeight()) <= chainActive.Height()) {
-            pblockindex = chainActive[coin.GetHeight()];
+        // Loop through txids and try to find which block they're in. Exit loop
+        // once a block is found.
+        for (const auto &tx : setTxids) {
+            const Coin &coin = AccessByTxid(*pcoinsTip, tx);
+            if (!coin.IsSpent()) {
+                pblockindex = chainActive[coin.GetHeight()];
+                break;
+            }
         }
     }
 
@@ -472,7 +477,7 @@ static UniValue gettxoutproof(const Config &config,
     if (ntxFound != setTxids.size()) {
         throw JSONRPCError(
             RPC_INVALID_ADDRESS_OR_KEY,
-            "(Not all) transactions not found in specified block");
+            "Not all transactions found in specified or retrieved block");
     }
 
     CDataStream ssMB(SER_NETWORK, PROTOCOL_VERSION);
@@ -660,7 +665,8 @@ static UniValue createrawtransaction(const Config &config,
             CTxOut out(Amount(0), CScript() << OP_RETURN << data);
             rawTx.vout.push_back(out);
         } else {
-            CTxDestination destination = DecodeDestination(name_);
+            CTxDestination destination =
+                DecodeDestination(name_, config.GetChainParams());
             if (!IsValidDestination(destination)) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
                                    std::string("Invalid Bitcoin address: ") +
@@ -682,7 +688,7 @@ static UniValue createrawtransaction(const Config &config,
         }
     }
 
-    return EncodeHexTx(rawTx);
+    return EncodeHexTx(CTransaction(rawTx));
 }
 
 static UniValue decoderawtransaction(const Config &config,
@@ -830,6 +836,10 @@ static void TxInErrorToJSON(const CTxIn &txin, UniValue &vErrorsRet,
 
 static UniValue signrawtransaction(const Config &config,
                                    const JSONRPCRequest &request) {
+#ifdef ENABLE_WALLET
+    CWallet *const pwallet = GetWalletForJSONRPCRequest(request);
+#endif
+
     if (request.fHelp || request.params.size() < 1 ||
         request.params.size() > 4) {
         throw std::runtime_error(
@@ -847,7 +857,7 @@ static UniValue signrawtransaction(const Config &config,
             "keys that, if given, will be the only keys used to sign the "
             "transaction.\n"
 #ifdef ENABLE_WALLET
-            + HelpRequiringPassphrase() +
+            + HelpRequiringPassphrase(pwallet) +
             "\n"
 #endif
 
@@ -924,7 +934,7 @@ static UniValue signrawtransaction(const Config &config,
     }
 
 #ifdef ENABLE_WALLET
-    LOCK2(cs_main, pwalletMain ? &pwalletMain->cs_wallet : nullptr);
+    LOCK2(cs_main, pwallet ? &pwallet->cs_wallet : nullptr);
 #else
     LOCK(cs_main);
 #endif
@@ -994,11 +1004,12 @@ static UniValue signrawtransaction(const Config &config,
 
             tempKeystore.AddKey(key);
         }
-#ifdef ENABLE_WALLET
-    } else if (pwalletMain) {
-        EnsureWalletIsUnlocked();
-#endif
     }
+#ifdef ENABLE_WALLET
+    else if (pwallet) {
+        EnsureWalletIsUnlocked(pwallet);
+    }
+#endif
 
     // Add previous txouts given in the RPC call:
     if (request.params.size() > 1 && !request.params[1].isNull()) {
@@ -1073,12 +1084,13 @@ static UniValue signrawtransaction(const Config &config,
             // signed:
             if (fGivenKeys && scriptPubKey.IsPayToScriptHash()) {
                 RPCTypeCheckObj(
-                    prevOut, {
-                                 {"txid", UniValueType(UniValue::VSTR)},
-                                 {"vout", UniValueType(UniValue::VNUM)},
-                                 {"scriptPubKey", UniValueType(UniValue::VSTR)},
-                                 {"redeemScript", UniValueType(UniValue::VSTR)},
-                             });
+                    prevOut,
+                    {
+                        {"txid", UniValueType(UniValue::VSTR)},
+                        {"vout", UniValueType(UniValue::VNUM)},
+                        {"scriptPubKey", UniValueType(UniValue::VSTR)},
+                        {"redeemScript", UniValueType(UniValue::VSTR)},
+                    });
                 UniValue v = find_value(prevOut, "redeemScript");
                 if (!v.isNull()) {
                     std::vector<uint8_t> rsData(ParseHexV(v, "redeemScript"));
@@ -1091,12 +1103,12 @@ static UniValue signrawtransaction(const Config &config,
 
 #ifdef ENABLE_WALLET
     const CKeyStore &keystore =
-        ((fGivenKeys || !pwalletMain) ? tempKeystore : *pwalletMain);
+        ((fGivenKeys || !pwallet) ? tempKeystore : *pwallet);
 #else
     const CKeyStore &keystore = tempKeystore;
 #endif
 
-    int nHashType = SIGHASH_ALL | SIGHASH_FORKID;
+    SigHashType sigHashType = SigHashType().withForkId();
     if (request.params.size() > 3 && !request.params[3].isNull()) {
         static std::map<std::string, int> mapSigHashValues = {
             {"ALL", SIGHASH_ALL},
@@ -1120,16 +1132,12 @@ static UniValue signrawtransaction(const Config &config,
             throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid sighash param");
         }
 
-        nHashType = mapSigHashValues[strHashType];
-        if ((nHashType & SIGHASH_FORKID) == 0) {
+        sigHashType = SigHashType(mapSigHashValues[strHashType]);
+        if (!sigHashType.hasForkId()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER,
                                "Signature must use SIGHASH_FORKID");
         }
     }
-
-    bool fHashSingle =
-        ((nHashType & ~(SIGHASH_ANYONECANPAY | SIGHASH_FORKID)) ==
-         SIGHASH_SINGLE);
 
     // Script verification errors.
     UniValue vErrors(UniValue::VARR);
@@ -1151,9 +1159,10 @@ static UniValue signrawtransaction(const Config &config,
 
         SignatureData sigdata;
         // Only sign SIGHASH_SINGLE if there's a corresponding output:
-        if (!fHashSingle || (i < mergedTx.vout.size())) {
+        if ((sigHashType.getBaseType() != BaseSigHashType::SINGLE) ||
+            (i < mergedTx.vout.size())) {
             ProduceSignature(MutableTransactionSignatureCreator(
-                                 &keystore, &mergedTx, i, amount, nHashType),
+                                 &keystore, &mergedTx, i, amount, sigHashType),
                              prevPubKey, sigdata);
         }
 
@@ -1180,7 +1189,7 @@ static UniValue signrawtransaction(const Config &config,
     bool fComplete = vErrors.empty();
 
     UniValue result(UniValue::VOBJ);
-    result.push_back(Pair("hex", EncodeHexTx(mergedTx)));
+    result.push_back(Pair("hex", EncodeHexTx(CTransaction(mergedTx))));
     result.push_back(Pair("complete", fComplete));
     if (!vErrors.empty()) {
         result.push_back(Pair("errors", vErrors));
@@ -1250,7 +1259,7 @@ static UniValue sendrawtransaction(const Config &config,
         CValidationState state;
         bool fMissingInputs;
         if (!AcceptToMemoryPool(config, mempool, state, std::move(tx),
-                                fLimitFree, &fMissingInputs, nullptr, false,
+                                fLimitFree, &fMissingInputs, false,
                                 nMaxRawTxFee)) {
             if (state.IsInvalid()) {
                 throw JSONRPCError(RPC_TRANSACTION_REJECTED,

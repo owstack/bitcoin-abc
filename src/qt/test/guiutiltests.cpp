@@ -7,56 +7,59 @@
 #include "config.h"
 #include "dstencode.h"
 #include "guiutil.h"
-#include "receiverequestdialog.h"
 
 namespace {
 
-class UtilCfgDummy : public DummyConfig {
+class GUIUtilTestConfig : public DummyConfig {
 public:
-    UtilCfgDummy() : useCashAddr(false) {}
+    GUIUtilTestConfig()
+        : DummyConfig(CBaseChainParams::MAIN), useCashAddr(false) {}
     void SetCashAddrEncoding(bool b) override { useCashAddr = b; }
     bool UseCashAddrEncoding() const override { return useCashAddr; }
-    const CChainParams &GetChainParams() const override {
-        return Params(CBaseChainParams::MAIN);
-    }
 
 private:
     bool useCashAddr;
 };
 
-} // anon ns
+} // namespace
 
 void GUIUtilTests::dummyAddressTest() {
-    CChainParams &params = Params(CBaseChainParams::MAIN);
-    UtilCfgDummy cfg;
+    GUIUtilTestConfig config;
+    const CChainParams &params = config.GetChainParams();
+
     std::string dummyaddr;
 
-    cfg.SetCashAddrEncoding(false);
-    dummyaddr = GUIUtil::DummyAddress(params, cfg);
+    config.SetCashAddrEncoding(false);
+    dummyaddr = GUIUtil::DummyAddress(config);
     QVERIFY(!IsValidDestinationString(dummyaddr, params));
     QVERIFY(!dummyaddr.empty());
 
-    cfg.SetCashAddrEncoding(true);
-    dummyaddr = GUIUtil::DummyAddress(params, cfg);
+    config.SetCashAddrEncoding(true);
+    dummyaddr = GUIUtil::DummyAddress(config);
     QVERIFY(!IsValidDestinationString(dummyaddr, params));
     QVERIFY(!dummyaddr.empty());
 }
 
 void GUIUtilTests::toCurrentEncodingTest() {
-    UtilCfgDummy config;
+    GUIUtilTestConfig config;
 
     // garbage in, garbage out
-    QVERIFY(ToCurrentEncoding("garbage", config) == "garbage");
+    QVERIFY(GUIUtil::convertToConfiguredAddressFormat(config, "garbage") ==
+            "garbage");
 
     QString cashaddr_pubkey =
         "bitcoincash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a";
     QString base58_pubkey = "1BpEi6DfDAUFd7GtittLSdBeYJvcoaVggu";
 
     config.SetCashAddrEncoding(true);
-    QVERIFY(ToCurrentEncoding(cashaddr_pubkey, config) == cashaddr_pubkey);
-    QVERIFY(ToCurrentEncoding(base58_pubkey, config) == cashaddr_pubkey);
+    QVERIFY(GUIUtil::convertToConfiguredAddressFormat(
+                config, cashaddr_pubkey) == cashaddr_pubkey);
+    QVERIFY(GUIUtil::convertToConfiguredAddressFormat(config, base58_pubkey) ==
+            cashaddr_pubkey);
 
     config.SetCashAddrEncoding(false);
-    QVERIFY(ToCurrentEncoding(cashaddr_pubkey, config) == base58_pubkey);
-    QVERIFY(ToCurrentEncoding(base58_pubkey, config) == base58_pubkey);
+    QVERIFY(GUIUtil::convertToConfiguredAddressFormat(
+                config, cashaddr_pubkey) == base58_pubkey);
+    QVERIFY(GUIUtil::convertToConfiguredAddressFormat(config, base58_pubkey) ==
+            base58_pubkey);
 }

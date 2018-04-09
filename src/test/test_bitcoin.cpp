@@ -2,14 +2,14 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#define BOOST_TEST_MODULE Bitcoin Test Suite
-
 #include "test_bitcoin.h"
 
 #include "chainparams.h"
 #include "config.h"
 #include "consensus/consensus.h"
 #include "consensus/validation.h"
+#include "crypto/sha256.h"
+#include "fs.h"
 #include "key.h"
 #include "miner.h"
 #include "net_processing.h"
@@ -26,10 +26,6 @@
 
 #include "test/testutil.h"
 
-#include <boost/filesystem.hpp>
-#include <boost/test/unit_test.hpp>
-#include <boost/thread.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -39,7 +35,6 @@
 #include <memory>
 #include <thread>
 
-std::unique_ptr<CConnman> g_connman;
 uint256 insecure_rand_seed = GetRandHash();
 FastRandomContext insecure_rand_ctx(insecure_rand_seed);
 
@@ -47,6 +42,8 @@ extern bool fPrintToConsole;
 extern void noui_connect();
 
 BasicTestingSetup::BasicTestingSetup(const std::string &chainName) {
+    SHA256AutoDetect();
+    RandomInit();
     ECC_Start();
     SetupEnvironment();
     SetupNetworking();
@@ -78,18 +75,21 @@ TestingSetup::TestingSetup(const std::string &chainName)
     ClearDatadirCache();
     pathTemp = GetTempPath() / strprintf("test_bitcoin_%lu_%i",
                                          (unsigned long)GetTime(),
-                                         (int)(GetRand(100000)));
-    boost::filesystem::create_directories(pathTemp);
-    ForceSetArg("-datadir", pathTemp.string());
+                                         (int)(InsecureRandRange(100000)));
+    fs::create_directories(pathTemp);
+    gArgs.ForceSetArg("-datadir", pathTemp.string());
     mempool.setSanityCheck(1.0);
     pblocktree = new CBlockTreeDB(1 << 20, true);
     pcoinsdbview = new CCoinsViewDB(1 << 23, true);
     pcoinsTip = new CCoinsViewCache(pcoinsdbview);
-    InitBlockIndex(config);
+    if (!InitBlockIndex(config)) {
+        throw std::runtime_error("InitBlockIndex failed.");
+    }
     {
         CValidationState state;
-        bool ok = ActivateBestChain(config, state);
-        BOOST_CHECK(ok);
+        if (!ActivateBestChain(config, state)) {
+            throw std::runtime_error("ActivateBestChain failed.");
+        }
     }
     nScriptCheckThreads = 3;
     for (int i = 0; i < nScriptCheckThreads - 1; i++) {
@@ -110,7 +110,7 @@ TestingSetup::~TestingSetup() {
     delete pcoinsTip;
     delete pcoinsdbview;
     delete pblocktree;
-    boost::filesystem::remove_all(pathTemp);
+    fs::remove_all(pathTemp);
 }
 
 TestChain100Setup::TestChain100Setup()
@@ -132,10 +132,9 @@ TestChain100Setup::TestChain100Setup()
 //
 CBlock TestChain100Setup::CreateAndProcessBlock(
     const std::vector<CMutableTransaction> &txns, const CScript &scriptPubKey) {
-    const CChainParams &chainparams = Params();
     const Config &config = GetConfig();
     std::unique_ptr<CBlockTemplate> pblocktemplate =
-        BlockAssembler(config, chainparams).CreateNewBlock(scriptPubKey);
+        BlockAssembler(config).CreateNewBlock(scriptPubKey);
     CBlock &block = pblocktemplate->block;
 
     // Replace mempool-selected txns with just coinbase plus passed-in txns:
@@ -179,18 +178,6 @@ CTxMemPoolEntry TestMemPoolEntryHelper::FromTx(const CTransaction &txn,
                            lp);
 }
 
-void Shutdown(void *parg) {
-    exit(0);
-}
-
-void StartShutdown() {
-    exit(0);
-}
-
-bool ShutdownRequested() {
-    return false;
-}
-
 namespace {
 // A place to put misc. setup code eg "the travis workaround" that needs to run
 // at program startup and exit
@@ -204,7 +191,6 @@ struct Init {
 Init init;
 
 Init::Init() {
-
     if (getenv("TRAVIS_NOHANG_WORKAROUND")) {
         // This is a workaround for MinGW/Win32 builds on Travis sometimes
         // hanging due to no output received by Travis after a 10-minute

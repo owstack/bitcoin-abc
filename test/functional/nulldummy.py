@@ -26,6 +26,7 @@ def trueDummy(tx):
     tx.vin[0].scriptSig = CScript(newscript)
     tx.rehash()
 
+
 '''
 This test is meant to exercise NULLDUMMY softfork.
 Connect to a single node.
@@ -40,11 +41,10 @@ Generate 427 more blocks.
 
 class NULLDUMMYTest(BitcoinTestFramework):
 
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
-        self.extra_args = [['-whitelist=127.0.0.1', '-walletprematurewitness']]
+        self.extra_args = [['-whitelist=127.0.0.1']]
 
     def run_test(self):
         self.address = self.nodes[0].getnewaddress()
@@ -65,45 +65,37 @@ class NULLDUMMYTest(BitcoinTestFramework):
             "Test 1: NULLDUMMY compliant base transactions should be accepted to mempool and mined before activation [430]")
         test1txs = [self.create_transaction(
             self.nodes[0], coinbase_txid[0], self.ms_address, 49)]
-        txid1 = self.tx_submit(self.nodes[0], test1txs[0])
+        txid1 = self.nodes[0].sendrawtransaction(
+            bytes_to_hex_str(test1txs[0].serialize()), True)
         test1txs.append(self.create_transaction(
             self.nodes[0], txid1, self.ms_address, 48))
-        txid2 = self.tx_submit(self.nodes[0], test1txs[1])
-        self.block_submit(self.nodes[0], test1txs, False, True)
+        txid2 = self.nodes[0].sendrawtransaction(
+            bytes_to_hex_str(test1txs[1].serialize()), True)
+        self.block_submit(self.nodes[0], test1txs, True)
 
         self.log.info(
             "Test 2: Non-NULLDUMMY base multisig transaction should not be accepted to mempool before activation")
         test2tx = self.create_transaction(
             self.nodes[0], txid2, self.ms_address, 48)
         trueDummy(test2tx)
-        txid4 = self.tx_submit(self.nodes[0], test2tx, NULLDUMMY_ERROR)
+        assert_raises_rpc_error(-26, NULLDUMMY_ERROR,
+                                self.nodes[0].sendrawtransaction, bytes_to_hex_str(test2tx.serialize()), True)
 
         self.log.info(
             "Test 3: Non-NULLDUMMY base transactions should be accepted in a block before activation [431]")
-        self.block_submit(self.nodes[0], [test2tx], False, True)
+        self.block_submit(self.nodes[0], [test2tx], True)
 
     def create_transaction(self, node, txid, to_address, amount):
         inputs = [{"txid": txid, "vout": 0}]
         outputs = {to_address: amount}
         rawtx = node.createrawtransaction(inputs, outputs)
-        signresult = node.signrawtransaction(rawtx, None, None, "ALL|FORKID")
+        signresult = node.signrawtransaction(rawtx)
         tx = CTransaction()
         f = BytesIO(hex_str_to_bytes(signresult['hex']))
         tx.deserialize(f)
         return tx
 
-    def tx_submit(self, node, tx, msg=""):
-        tx.rehash()
-        try:
-            node.sendrawtransaction(
-                bytes_to_hex_str(tx.serialize_with_witness()), True)
-        except JSONRPCException as exp:
-            assert_equal(exp.error["message"], msg)
-        else:
-            assert_equal('', msg)
-        return tx.hash
-
-    def block_submit(self, node, txs, witness=False, accept=False):
+    def block_submit(self, node, txs, accept=False):
         block = create_block(self.tip, create_coinbase(
             self.lastblockheight + 1), self.lastblocktime + 1)
         block.nVersion = 4
@@ -113,7 +105,7 @@ class NULLDUMMYTest(BitcoinTestFramework):
         block.hashMerkleRoot = block.calc_merkle_root()
         block.rehash()
         block.solve()
-        node.submitblock(bytes_to_hex_str(block.serialize(True)))
+        node.submitblock(bytes_to_hex_str(block.serialize()))
         if (accept):
             assert_equal(node.getbestblockhash(), block.hash)
             self.tip = block.sha256
@@ -122,6 +114,7 @@ class NULLDUMMYTest(BitcoinTestFramework):
             self.lastblockheight += 1
         else:
             assert_equal(node.getbestblockhash(), self.lastblockhash)
+
 
 if __name__ == '__main__':
     NULLDUMMYTest().main()

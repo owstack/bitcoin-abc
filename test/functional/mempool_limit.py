@@ -10,9 +10,7 @@ from test_framework.util import *
 
 
 class MempoolLimitTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 1
 
@@ -35,8 +33,7 @@ class MempoolLimitTest(BitcoinTestFramework):
         txF = self.nodes[0].fundrawtransaction(tx)
         # return to automatic fee selection
         self.nodes[0].settxfee(0)
-        txFS = self.nodes[0].signrawtransaction(
-            txF['hex'], None, None, "ALL|FORKID")
+        txFS = self.nodes[0].signrawtransaction(txF['hex'])
         txid = self.nodes[0].sendrawtransaction(txFS['hex'])
 
         relayfee = self.nodes[0].getnetworkinfo()['relayfee']
@@ -50,6 +47,7 @@ class MempoolLimitTest(BitcoinTestFramework):
         assert(txid not in self.nodes[0].getrawmempool())
         txdata = self.nodes[0].gettransaction(txid)
         assert(txdata['confirmations'] == 0)  # confirmation should still be 0
+
 
 if __name__ == '__main__':
     MempoolLimitTest().main()

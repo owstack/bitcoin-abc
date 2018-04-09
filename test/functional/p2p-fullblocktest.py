@@ -15,11 +15,11 @@ import struct
 from test_framework.cdefs import LEGACY_MAX_BLOCK_SIZE, MAX_BLOCK_SIGOPS_PER_MB
 
 
-class PreviousSpendableOutput(object):
-
+class PreviousSpendableOutput():
     def __init__(self, tx=CTransaction(), n=-1):
         self.tx = tx
         self.n = n  # the output we're spending
+
 
 '''
 This reimplements tests from the bitcoinj/FullBlockTestGenerator used
@@ -57,14 +57,11 @@ class CBrokenBlock(CBlock):
 
 
 class FullBlockTest(ComparisonTestFramework):
-
     # Can either run this test as 1 node with expected answers, or two and compare them.
-    # Change the "outcome" variable from each TestInstance object to only do
-    # the comparison.
-
-    def __init__(self):
-        super().__init__()
+    # Change the "outcome" variable from each TestInstance object to only do the comparison.
+    def set_test_params(self):
         self.num_nodes = 1
+        self.setup_clean_chain = True
         self.block_heights = {}
         self.coinbase_key = CECKey()
         self.coinbase_key.set_secretbytes(b"horsebattery")
@@ -396,7 +393,7 @@ class FullBlockTest(ComparisonTestFramework):
 
         # Extend the b26 chain to make sure bitcoind isn't accepting b26
         b27 = block(27, spend=out[7])
-        yield rejected(RejectResult(0, b'bad-prevblk'))
+        yield rejected(False)
 
         # Now try a too-large-coinbase script
         tip(15)
@@ -408,7 +405,7 @@ class FullBlockTest(ComparisonTestFramework):
 
         # Extend the b28 chain to make sure bitcoind isn't accepting b28
         b29 = block(29, spend=out[7])
-        yield rejected(RejectResult(0, b'bad-prevblk'))
+        yield rejected(False)
 
         # b30 has a max-sized coinbase scriptSig.
         tip(23)
@@ -573,7 +570,7 @@ class FullBlockTest(ComparisonTestFramework):
             # signature hash function
             sighash = SignatureHashForkId(
                 redeem_script, tx, 1, SIGHASH_ALL | SIGHASH_FORKID,
-                                          lastAmount)
+                lastAmount)
             sig = self.coinbase_key.sign(
                 sighash) + bytes(bytearray([SIGHASH_ALL | SIGHASH_FORKID]))
             scriptSig = CScript([sig, redeem_script])
@@ -1311,6 +1308,7 @@ class FullBlockTest(ComparisonTestFramework):
             yield accepted()
 
             chain1_tip += 2
+
 
 if __name__ == '__main__':
     FullBlockTest().main()

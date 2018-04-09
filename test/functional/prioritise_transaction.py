@@ -15,9 +15,7 @@ from test_framework.cdefs import LEGACY_MAX_BLOCK_SIZE
 
 
 class PrioritiseTransactionTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 1
         self.extra_args = [["-printpriority=1"]]
@@ -114,8 +112,7 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         inputs.append({"txid": utxo["txid"], "vout": utxo["vout"]})
         outputs[self.nodes[0].getnewaddress()] = utxo["amount"] - self.relayfee
         raw_tx = self.nodes[0].createrawtransaction(inputs, outputs)
-        tx_hex = self.nodes[0].signrawtransaction(
-            raw_tx, None, None, "ALL|FORKID")["hex"]
+        tx_hex = self.nodes[0].signrawtransaction(raw_tx)["hex"]
         txid = self.nodes[0].sendrawtransaction(tx_hex)
 
         # A tx that spends an in-mempool tx has 0 priority, so we can use it to
@@ -126,17 +123,13 @@ class PrioritiseTransactionTest(BitcoinTestFramework):
         outputs = {}
         outputs[self.nodes[0].getnewaddress()] = utxo["amount"] - self.relayfee
         raw_tx2 = self.nodes[0].createrawtransaction(inputs, outputs)
-        tx2_hex = self.nodes[0].signrawtransaction(
-            raw_tx2, None, None, "ALL|FORKID")["hex"]
+        tx2_hex = self.nodes[0].signrawtransaction(raw_tx2)["hex"]
         tx2_id = self.nodes[0].decoderawtransaction(tx2_hex)["txid"]
 
-        try:
-            self.nodes[0].sendrawtransaction(tx2_hex)
-        except JSONRPCException as exp:
-            assert_equal(exp.error['code'], -26)  # insufficient fee
-            assert(tx2_id not in self.nodes[0].getrawmempool())
-        else:
-            assert(False)
+        # This will raise an exception due to min relay fee not being met
+        assert_raises_rpc_error(-26, "66: insufficient priority",
+                                self.nodes[0].sendrawtransaction, tx2_hex)
+        assert(tx2_id not in self.nodes[0].getrawmempool())
 
         # This is a less than 1000-byte transaction, so just set the fee
         # to be the minimum for a 1000 byte transaction and check that it is

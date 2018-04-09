@@ -224,8 +224,8 @@ WalletModel::prepareTransaction(WalletModelTransaction &transaction,
             setAddress.insert(rcp.address);
             ++nAddresses;
 
-            CScript scriptPubKey = GetScriptForDestination(
-                DecodeDestination(rcp.address.toStdString()));
+            CScript scriptPubKey = GetScriptForDestination(DecodeDestination(
+                rcp.address.toStdString(), wallet->chainParams));
             CRecipient recipient = {scriptPubKey, Amount(rcp.amount),
                                     rcp.fSubtractFeeFromAmount};
             vecSend.push_back(recipient);
@@ -329,7 +329,8 @@ WalletModel::sendCoins(WalletModelTransaction &transaction) {
         // Don't touch the address book when we have a payment request
         if (!rcp.paymentRequest.IsInitialized()) {
             std::string strAddress = rcp.address.toStdString();
-            CTxDestination dest = DecodeDestination(strAddress);
+            CTxDestination dest =
+                DecodeDestination(strAddress, wallet->chainParams);
             std::string strLabel = rcp.label.toStdString();
             {
                 LOCK(wallet->cs_wallet);
@@ -437,8 +438,9 @@ static void NotifyAddressBookChanged(WalletModel *walletmodel, CWallet *wallet,
     QString strPurpose = QString::fromStdString(purpose);
 
     qDebug() << "NotifyAddressBookChanged: " + strAddress + " " + strLabel +
-                    " isMine=" + QString::number(isMine) + " purpose=" +
-                    strPurpose + " status=" + QString::number(status);
+                    " isMine=" + QString::number(isMine) +
+                    " purpose=" + strPurpose +
+                    " status=" + QString::number(status);
     QMetaObject::invokeMethod(walletmodel, "updateAddressBook",
                               Qt::QueuedConnection, Q_ARG(QString, strAddress),
                               Q_ARG(QString, strLabel), Q_ARG(bool, isMine),
@@ -546,8 +548,8 @@ void WalletModel::getOutputs(const std::vector<COutPoint> &vOutpoints,
         if (!wallet->mapWallet.count(outpoint.hash)) continue;
         int nDepth = wallet->mapWallet[outpoint.hash].GetDepthInMainChain();
         if (nDepth < 0) continue;
-        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth, true,
-                    true);
+        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth,
+                    true /* spendable */, true /* solvable */, true /* safe */);
         vOutputs.push_back(out);
     }
 }
@@ -574,11 +576,12 @@ void WalletModel::listCoins(
         if (!wallet->mapWallet.count(outpoint.hash)) continue;
         int nDepth = wallet->mapWallet[outpoint.hash].GetDepthInMainChain();
         if (nDepth < 0) continue;
-        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth, true,
-                    true);
+        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth,
+                    true /* spendable */, true /* solvable */, true /* safe */);
         if (outpoint.n < out.tx->tx->vout.size() &&
-            wallet->IsMine(out.tx->tx->vout[outpoint.n]) == ISMINE_SPENDABLE)
+            wallet->IsMine(out.tx->tx->vout[outpoint.n]) == ISMINE_SPENDABLE) {
             vCoins.push_back(out);
+        }
     }
 
     for (const COutput &out : vCoins) {
@@ -590,7 +593,9 @@ void WalletModel::listCoins(
             if (!wallet->mapWallet.count(cout.tx->tx->vin[0].prevout.hash))
                 break;
             cout = COutput(&wallet->mapWallet[cout.tx->tx->vin[0].prevout.hash],
-                           cout.tx->tx->vin[0].prevout.n, 0, true, true);
+                           cout.tx->tx->vin[0].prevout.n, 0 /* depth */,
+                           true /* spendable */, true /* solvable */,
+                           true /* safe */);
         }
 
         CTxDestination address;
@@ -639,7 +644,7 @@ void WalletModel::loadReceiveRequests(
 bool WalletModel::saveReceiveRequest(const std::string &sAddress,
                                      const int64_t nId,
                                      const std::string &sRequest) {
-    CTxDestination dest = DecodeDestination(sAddress);
+    CTxDestination dest = DecodeDestination(sAddress, wallet->chainParams);
 
     std::stringstream ss;
     ss << nId;
@@ -668,7 +673,7 @@ bool WalletModel::abandonTransaction(uint256 hash) const {
 }
 
 bool WalletModel::isWalletEnabled() {
-    return !GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET);
+    return !gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET);
 }
 
 bool WalletModel::hdEnabled() const {
@@ -677,4 +682,8 @@ bool WalletModel::hdEnabled() const {
 
 int WalletModel::getDefaultConfirmTarget() const {
     return nTxConfirmTarget;
+}
+
+const CChainParams &WalletModel::getChainParams() const {
+    return wallet->chainParams;
 }

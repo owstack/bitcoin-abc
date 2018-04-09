@@ -8,11 +8,7 @@ from test_framework.util import *
 
 
 class SignMessagesTest(BitcoinTestFramework):
-
-    """Tests RPC commands for signing and verifying messages."""
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 1
 
@@ -33,6 +29,7 @@ class SignMessagesTest(BitcoinTestFramework):
 
         # Verify the message
         assert(self.nodes[0].verifymessage(address, signature, message))
+
 
 if __name__ == '__main__':
     SignMessagesTest().main()

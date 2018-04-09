@@ -7,13 +7,13 @@
 
 #include "validationinterface.h"
 
+#include <list>
 #include <map>
-#include <string>
 
 class CBlockIndex;
 class CZMQAbstractNotifier;
 
-class CZMQNotificationInterface : public CValidationInterface {
+class CZMQNotificationInterface final : public CValidationInterface {
 public:
     virtual ~CZMQNotificationInterface();
 
@@ -24,8 +24,13 @@ protected:
     void Shutdown();
 
     // CValidationInterface
-    void SyncTransaction(const CTransaction &tx, const CBlockIndex *pindex,
-                         int posInBlock) override;
+    void TransactionAddedToMempool(const CTransactionRef &tx) override;
+    void
+    BlockConnected(const std::shared_ptr<const CBlock> &pblock,
+                   const CBlockIndex *pindexConnected,
+                   const std::vector<CTransactionRef> &vtxConflicted) override;
+    void
+    BlockDisconnected(const std::shared_ptr<const CBlock> &pblock) override;
     void UpdatedBlockTip(const CBlockIndex *pindexNew,
                          const CBlockIndex *pindexFork,
                          bool fInitialDownload) override;

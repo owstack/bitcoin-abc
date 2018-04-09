@@ -20,13 +20,8 @@ from test_framework.util import *
 
 
 class MempoolSpendCoinbaseTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.num_nodes = 1
-        self.setup_clean_chain = False
-
-        # Just need one node for this test
         self.extra_args = [["-checkmempool"]]
 
     def run_test(self):
@@ -45,8 +40,8 @@ class MempoolSpendCoinbaseTest(BitcoinTestFramework):
         spend_101_id = self.nodes[0].sendrawtransaction(spends_raw[0])
 
         # coinbase at height 102 should be too immature to spend
-        assert_raises(JSONRPCException, self.nodes[
-                      0].sendrawtransaction, spends_raw[1])
+        assert_raises_rpc_error(-26, "bad-txns-premature-spend-of-coinbase",
+                                self.nodes[0].sendrawtransaction, spends_raw[1])
 
         # mempool should have just spend_101:
         assert_equal(self.nodes[0].getrawmempool(), [spend_101_id])
@@ -58,6 +53,7 @@ class MempoolSpendCoinbaseTest(BitcoinTestFramework):
         # ... and now height 102 can be spent:
         spend_102_id = self.nodes[0].sendrawtransaction(spends_raw[1])
         assert_equal(self.nodes[0].getrawmempool(), [spend_102_id])
+
 
 if __name__ == '__main__':
     MempoolSpendCoinbaseTest().main()

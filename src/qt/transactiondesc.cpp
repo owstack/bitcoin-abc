@@ -90,7 +90,8 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx,
         // Offline transaction
         if (nNet > Amount(0)) {
             // Credit
-            CTxDestination address = DecodeDestination(rec->address);
+            CTxDestination address =
+                DecodeDestination(rec->address, wallet->chainParams);
             if (IsValidDestination(address)) {
                 if (wallet->mapAddressBook.count(address)) {
                     strHTML +=
@@ -122,7 +123,8 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx,
         // Online transaction
         std::string strAddress = wtx.mapValue["to"];
         strHTML += "<b>" + tr("To") + ":</b> ";
-        CTxDestination dest = DecodeDestination(strAddress);
+        CTxDestination dest =
+            DecodeDestination(strAddress, wallet->chainParams);
         if (wallet->mapAddressBook.count(dest) &&
             !wallet->mapAddressBook[dest].name.empty())
             strHTML +=
@@ -314,7 +316,7 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx,
     //
     // Debug view
     //
-    if (fDebug) {
+    if (logCategories != BCLog::NONE) {
         strHTML += "<hr><br>" + tr("Debug information") + "<br><br>";
         for (const CTxIn &txin : wtx.tx->vin) {
             if (wallet->IsMine(txin))
@@ -357,11 +359,11 @@ QString TransactionDesc::toHTML(CWallet *wallet, CWalletTx &wtx,
                 }
                 strHTML = strHTML + " " + tr("Amount") + "=" +
                           BitcoinUnits::formatHtmlWithUnit(unit, vout.nValue);
-                strHTML =
-                    strHTML + " IsMine=" +
-                    (wallet->IsMine(vout) & ISMINE_SPENDABLE ? tr("true")
-                                                             : tr("false")) +
-                    "</li>";
+                strHTML = strHTML +
+                          " IsMine=" + (wallet->IsMine(vout) & ISMINE_SPENDABLE
+                                            ? tr("true")
+                                            : tr("false")) +
+                          "</li>";
                 strHTML =
                     strHTML + " IsWatchOnly=" +
                     (wallet->IsMine(vout) & ISMINE_WATCH_ONLY ? tr("true")

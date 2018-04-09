@@ -2,13 +2,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "versionbits.h"
 #include "chain.h"
 #include "chainparams.h"
 #include "consensus/params.h"
 #include "test/test_bitcoin.h"
-#include "test/test_random.h"
 #include "validation.h"
+#include "versionbits.h"
 
 #include <boost/test/unit_test.hpp>
 
@@ -98,7 +97,7 @@ public:
 
     VersionBitsTester &TestStateSinceHeight(int height) {
         for (int i = 0; i < CHECKERS; i++) {
-            if ((insecure_rand() & ((1 << i) - 1)) == 0) {
+            if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(
                     checker[i].GetStateSinceHeightFor(
                         vpblock.empty() ? nullptr : vpblock.back()) == height,
@@ -111,7 +110,7 @@ public:
 
     VersionBitsTester &TestDefined() {
         for (int i = 0; i < CHECKERS; i++) {
-            if ((insecure_rand() & ((1 << i) - 1)) == 0) {
+            if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(
                     checker[i].GetStateFor(vpblock.empty() ? nullptr
                                                            : vpblock.back()) ==
@@ -125,7 +124,7 @@ public:
 
     VersionBitsTester &TestStarted() {
         for (int i = 0; i < CHECKERS; i++) {
-            if ((insecure_rand() & ((1 << i) - 1)) == 0) {
+            if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(
                     checker[i].GetStateFor(vpblock.empty() ? nullptr
                                                            : vpblock.back()) ==
@@ -139,7 +138,7 @@ public:
 
     VersionBitsTester &TestLockedIn() {
         for (int i = 0; i < CHECKERS; i++) {
-            if ((insecure_rand() & ((1 << i) - 1)) == 0) {
+            if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(
                     checker[i].GetStateFor(vpblock.empty() ? nullptr
                                                            : vpblock.back()) ==
@@ -153,7 +152,7 @@ public:
 
     VersionBitsTester &TestActive() {
         for (int i = 0; i < CHECKERS; i++) {
-            if ((insecure_rand() & ((1 << i) - 1)) == 0) {
+            if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(
                     checker[i].GetStateFor(vpblock.empty() ? nullptr
                                                            : vpblock.back()) ==
@@ -167,7 +166,7 @@ public:
 
     VersionBitsTester &TestFailed() {
         for (int i = 0; i < CHECKERS; i++) {
-            if ((insecure_rand() & ((1 << i) - 1)) == 0) {
+            if (InsecureRandBits(i) == 0) {
                 BOOST_CHECK_MESSAGE(
                     checker[i].GetStateFor(vpblock.empty() ? nullptr
                                                            : vpblock.back()) ==
@@ -362,8 +361,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test) {
     }
 
     // Sanity checks of version bit deployments
-    const Consensus::Params &mainnetParams =
-        Params(CBaseChainParams::MAIN).GetConsensus();
+    const auto chainParams = CreateChainParams(CBaseChainParams::MAIN);
+    const Consensus::Params &mainnetParams = chainParams->GetConsensus();
     for (int i = 0; i < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS; i++) {
         uint32_t bitmask =
             VersionBitsMask(mainnetParams, (Consensus::DeploymentPos)i);
@@ -392,8 +391,8 @@ BOOST_AUTO_TEST_CASE(versionbits_test) {
 BOOST_AUTO_TEST_CASE(versionbits_computeblockversion) {
     // Check that ComputeBlockVersion will set the appropriate bit correctly
     // on mainnet.
-    const Consensus::Params &mainnetParams =
-        Params(CBaseChainParams::MAIN).GetConsensus();
+    const auto chainParams = CreateChainParams(CBaseChainParams::MAIN);
+    const Consensus::Params &mainnetParams = chainParams->GetConsensus();
 
     // Use the TESTDUMMY deployment for testing purposes.
     int64_t bit =

@@ -241,12 +241,14 @@ BOOST_AUTO_TEST_CASE(basic_transaction_tests) {
     CMutableTransaction tx;
     stream >> tx;
     CValidationState state;
-    BOOST_CHECK_MESSAGE(CheckRegularTransaction(tx, state) && state.IsValid(),
+    BOOST_CHECK_MESSAGE(CheckRegularTransaction(CTransaction(tx), state) &&
+                            state.IsValid(),
                         "Simple deserialized transaction should be valid.");
 
     // Check that duplicate txins fail
     tx.vin.push_back(tx.vin[0]);
-    BOOST_CHECK_MESSAGE(!CheckRegularTransaction(tx, state) || !state.IsValid(),
+    BOOST_CHECK_MESSAGE(!CheckRegularTransaction(CTransaction(tx), state) ||
+                            !state.IsValid(),
                         "Transaction with duplicate txins should be invalid.");
 }
 
@@ -276,7 +278,7 @@ SetupDummyInputs(CBasicKeyStore &keystoreRet, CCoinsViewCache &coinsRet) {
     dummyTransactions[0].vout[1].nValue = 50 * CENT;
     dummyTransactions[0].vout[1].scriptPubKey
         << ToByteVector(key[1].GetPubKey()) << OP_CHECKSIG;
-    AddCoins(coinsRet, dummyTransactions[0], 0);
+    AddCoins(coinsRet, CTransaction(dummyTransactions[0]), 0);
 
     dummyTransactions[1].vout.resize(2);
     dummyTransactions[1].vout[0].nValue = 21 * CENT;
@@ -285,7 +287,7 @@ SetupDummyInputs(CBasicKeyStore &keystoreRet, CCoinsViewCache &coinsRet) {
     dummyTransactions[1].vout[1].nValue = 22 * CENT;
     dummyTransactions[1].vout[1].scriptPubKey =
         GetScriptForDestination(key[3].GetPubKey().GetID());
-    AddCoins(coinsRet, dummyTransactions[1], 0);
+    AddCoins(coinsRet, CTransaction(dummyTransactions[1]), 0);
 
     return dummyTransactions;
 }
@@ -314,8 +316,9 @@ BOOST_AUTO_TEST_CASE(test_Get) {
     t1.vout[0].nValue = 90 * CENT;
     t1.vout[0].scriptPubKey << OP_1;
 
-    BOOST_CHECK(AreInputsStandard(t1, coins));
-    BOOST_CHECK_EQUAL(coins.GetValueIn(t1), (50 + 21 + 22) * CENT);
+    BOOST_CHECK(AreInputsStandard(CTransaction(t1), coins));
+    BOOST_CHECK_EQUAL(coins.GetValueIn(CTransaction(t1)),
+                      (50 + 21 + 22) * CENT);
 }
 
 void CreateCreditAndSpend(const CKeyStore &keystore, const CScript &outscript,
@@ -345,8 +348,8 @@ void CreateCreditAndSpend(const CKeyStore &keystore, const CScript &outscript,
     inputm.vout.resize(1);
     inputm.vout[0].nValue = Amount(1);
     inputm.vout[0].scriptPubKey = CScript();
-    bool ret = SignSignature(keystore, *output, inputm, 0,
-                             SIGHASH_ALL | SIGHASH_FORKID);
+    bool ret =
+        SignSignature(keystore, *output, inputm, 0, SigHashType().withForkId());
     BOOST_CHECK_EQUAL(ret, success);
     CDataStream ssin(SER_NETWORK, PROTOCOL_VERSION);
     ssin << inputm;
@@ -538,31 +541,31 @@ BOOST_AUTO_TEST_CASE(test_IsStandard) {
     t.vout[0].scriptPubKey = GetScriptForDestination(key.GetPubKey().GetID());
 
     std::string reason;
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
 
     // Check dust with default relay fee:
     Amount nDustThreshold = 3 * 182 * dustRelayFee.GetFeePerK() / 1000;
     BOOST_CHECK_EQUAL(nDustThreshold, Amount(546));
     // dust:
     t.vout[0].nValue = nDustThreshold - Amount(1);
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
     // not dust:
     t.vout[0].nValue = nDustThreshold;
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
 
     // Check dust with odd relay fee to verify rounding:
     // nDustThreshold = 182 * 1234 / 1000 * 3
     dustRelayFee = CFeeRate(Amount(1234));
     // dust:
     t.vout[0].nValue = Amount(672 - 1);
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
     // not dust:
     t.vout[0].nValue = Amount(672);
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
     dustRelayFee = CFeeRate(DUST_RELAY_TX_FEE);
 
     t.vout[0].scriptPubKey = CScript() << OP_1;
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
 
     // MAX_OP_RETURN_RELAY-byte TX_NULL_DATA (standard)
     t.vout[0].scriptPubKey =
@@ -572,7 +575,7 @@ BOOST_AUTO_TEST_CASE(test_IsStandard) {
                               "271967f1a67130b7105cd6a828e03909a67962e0ea1f61de"
                               "b649f6bc3f4cef38");
     BOOST_CHECK_EQUAL(MAX_OP_RETURN_RELAY, t.vout[0].scriptPubKey.size());
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
 
     // MAX_OP_RETURN_RELAY+1-byte TX_NULL_DATA (non-standard)
     t.vout[0].scriptPubKey =
@@ -582,34 +585,102 @@ BOOST_AUTO_TEST_CASE(test_IsStandard) {
                               "271967f1a67130b7105cd6a828e03909a67962e0ea1f61de"
                               "b649f6bc3f4cef3800");
     BOOST_CHECK_EQUAL(MAX_OP_RETURN_RELAY + 1, t.vout[0].scriptPubKey.size());
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
+
+    /**
+     * Check acceptance of larger op_return when asked to.
+     */
+
+    // New default size of 223 byte is standard
+    t.vout[0].scriptPubKey =
+        CScript() << OP_RETURN
+                  << ParseHex("646578784062697477617463682e636f2092c558ed52c56d"
+                              "8dd14ca76226bc936a84820d898443873eb03d8854b21fa3"
+                              "952b99a2981873e74509281730d78a21786d34a38bd1ebab"
+                              "822fad42278f7f4420db6ab1fd2b6826148d4f73bb41ec2d"
+                              "40a6d5793d66e17074a0c56a8a7df21062308f483dd6e38d"
+                              "53609d350038df0a1b2a9ac8332016e0b904f66880dd0108"
+                              "81c4e8074cce8e4ad6c77cb3460e01bf0e7e811b5f945f83"
+                              "732ba6677520a893d75d9a966cb8f85dc301656b1635c631"
+                              "f5d00d4adf73f2dd112ca75cf19754651909becfbe65aed1"
+                              "3afb2ab8");
+    BOOST_CHECK_EQUAL(MAX_OP_RETURN_RELAY_LARGE, t.vout[0].scriptPubKey.size());
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason, true));
+
+    // Larger than default size of 223 byte is non-standard
+    t.vout[0].scriptPubKey =
+        CScript() << OP_RETURN
+                  << ParseHex("646578784062697477617463682e636f2092c558ed52c56d"
+                              "8dd14ca76226bc936a84820d898443873eb03d8854b21fa3"
+                              "952b99a2981873e74509281730d78a21786d34a38bd1ebab"
+                              "822fad42278f7f4420db6ab1fd2b6826148d4f73bb41ec2d"
+                              "40a6d5793d66e17074a0c56a8a7df21062308f483dd6e38d"
+                              "53609d350038df0a1b2a9ac8332016e0b904f66880dd0108"
+                              "81c4e8074cce8e4ad6c77cb3460e01bf0e7e811b5f945f83"
+                              "732ba6677520a893d75d9a966cb8f85dc301656b1635c631"
+                              "f5d00d4adf73f2dd112ca75cf19754651909becfbe65aed1"
+                              "3afb2ab800");
+    BOOST_CHECK_EQUAL(MAX_OP_RETURN_RELAY_LARGE + 1,
+                      t.vout[0].scriptPubKey.size());
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason, true));
+
+    /**
+     * Check when a custom value is used for -datacarriersize .
+     */
+    unsigned newMaxSize = MAX_OP_RETURN_RELAY + 7;
+    gArgs.ForceSetArg("-datacarriersize", std::to_string(newMaxSize));
+
+    // Max user provided payload size is standard
+    t.vout[0].scriptPubKey =
+        CScript() << OP_RETURN
+                  << ParseHex("04678afdb0fe5548271967f1a67130b7105cd6a828e03909"
+                              "a67962e0ea1f61deb649f6bc3f4cef3804678afdb0fe5548"
+                              "271967f1a67130b7105cd6a828e03909a67962e0ea1f61de"
+                              "b649f6bc3f4cef3877696e64657878");
+    BOOST_CHECK_EQUAL(t.vout[0].scriptPubKey.size(), newMaxSize);
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason, false));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason, true));
+
+    // Max user provided payload size + 1 is non-standard
+    t.vout[0].scriptPubKey =
+        CScript() << OP_RETURN
+                  << ParseHex("04678afdb0fe5548271967f1a67130b7105cd6a828e03909"
+                              "a67962e0ea1f61deb649f6bc3f4cef3804678afdb0fe5548"
+                              "271967f1a67130b7105cd6a828e03909a67962e0ea1f61de"
+                              "b649f6bc3f4cef3877696e6465787800");
+    BOOST_CHECK_EQUAL(t.vout[0].scriptPubKey.size(), newMaxSize + 1);
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason, false));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason, true));
+
+    // Clear custom confirguration.
+    gArgs.ClearArg("-datacarriersize");
 
     // Data payload can be encoded in any way...
     t.vout[0].scriptPubKey = CScript() << OP_RETURN << ParseHex("");
-    BOOST_CHECK(IsStandardTx(t, reason));
-    t.vout[0].scriptPubKey = CScript() << OP_RETURN << ParseHex("00")
-                                       << ParseHex("01");
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
+    t.vout[0].scriptPubKey = CScript()
+                             << OP_RETURN << ParseHex("00") << ParseHex("01");
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
     // OP_RESERVED *is* considered to be a PUSHDATA type opcode by IsPushOnly()!
     t.vout[0].scriptPubKey = CScript() << OP_RETURN << OP_RESERVED << -1 << 0
                                        << ParseHex("01") << 2 << 3 << 4 << 5
                                        << 6 << 7 << 8 << 9 << 10 << 11 << 12
                                        << 13 << 14 << 15 << 16;
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
     t.vout[0].scriptPubKey = CScript()
                              << OP_RETURN << 0 << ParseHex("01") << 2
                              << ParseHex("fffffffffffffffffffffffffffffffffffff"
                                          "fffffffffffffffffffffffffffffffffff");
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
 
     // ...so long as it only contains PUSHDATA's
     t.vout[0].scriptPubKey = CScript() << OP_RETURN << OP_RETURN;
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
 
     // TX_NULL_DATA w/o PUSHDATA
     t.vout.resize(1);
     t.vout[0].scriptPubKey = CScript() << OP_RETURN;
-    BOOST_CHECK(IsStandardTx(t, reason));
+    BOOST_CHECK(IsStandardTx(CTransaction(t), reason));
 
     // Only one TX_NULL_DATA permitted in all cases
     t.vout.resize(2);
@@ -621,18 +692,18 @@ BOOST_AUTO_TEST_CASE(test_IsStandard) {
         CScript() << OP_RETURN
                   << ParseHex("04678afdb0fe5548271967f1a67130b7105cd6a828e03909"
                               "a67962e0ea1f61deb649f6bc3f4cef38");
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
 
     t.vout[0].scriptPubKey =
         CScript() << OP_RETURN
                   << ParseHex("04678afdb0fe5548271967f1a67130b7105cd6a828e03909"
                               "a67962e0ea1f61deb649f6bc3f4cef38");
     t.vout[1].scriptPubKey = CScript() << OP_RETURN;
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
 
     t.vout[0].scriptPubKey = CScript() << OP_RETURN;
     t.vout[1].scriptPubKey = CScript() << OP_RETURN;
-    BOOST_CHECK(!IsStandardTx(t, reason));
+    BOOST_CHECK(!IsStandardTx(CTransaction(t), reason));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -78,6 +78,12 @@ static CBlock CreateGenesisBlock(uint32_t nTime, uint32_t nNonce,
                               nBits, nVersion, genesisReward);
 }
 
+void CChainParams::UpdateBIP9Parameters(Consensus::DeploymentPos d,
+                                        int64_t nStartTime, int64_t nTimeout) {
+    consensus.vDeployments[d].nStartTime = nStartTime;
+    consensus.vDeployments[d].nTimeout = nTimeout;
+}
+
 /**
  * Main network
  */
@@ -130,21 +136,25 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = 1493596800;
 
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork =
-            uint256S("0x0000000000000000000000000000000000000000007e5dbf54c7f6b"
-                     "58a6853cd");
+        consensus.nMinimumChainWork = uint256S(
+            "000000000000000000000000000000000000000000915997400e8cf8e5e97d33");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
-        consensus.defaultAssumeValid =
-            uint256S("0x000000000000000005e14d3f9fdfb70745308706615cfa9edca4f45"
-                     "58332b201");
+        consensus.defaultAssumeValid = uint256S(
+            "000000000000000001d2ce557406b017a928be25ee98906397d339c3f68eec5d");
 
-        // Aug, 1 hard fork
+        // August 1, 2017 hard fork
         consensus.uahfHeight = 478559;
 
-        // Nov, 13 hard fork
+        // November 13, 2017 hard fork
         consensus.daaHeight = 504031;
+
+        // May 15, 2018 hard fork
+        consensus.monolithActivationTime = 1526400000;
+
+        // Nov 15, 2018 hard fork
+        consensus.magneticAnomalyActivationTime = 1542300000;
 
         /**
          * The message start string is designed to be unlikely to occur in
@@ -245,19 +255,18 @@ public:
             }};
 
         // Data as of block
-        // 00000000000000000166d612d5595e2b1cd88d71d695fc580af64d8da8658c23
-        // (height 446482).
+        // 000000000000000001d2ce557406b017a928be25ee98906397d339c3f68eec5d
+        // (height 523992).
         chainTxData = ChainTxData{
             // UNIX timestamp of last known number of transactions.
-            1483472411,
+            1522608016,
             // Total number of transactions between genesis and that timestamp
             // (the tx=... number in the SetBestChain debug.log lines)
-            184495391,
+            248589038,
             // Estimated number of transactions per second after that timestamp.
             3.2};
     }
 };
-static CMainParams mainParams;
 
 /**
  * Testnet (v3)
@@ -304,21 +313,25 @@ public:
         consensus.vDeployments[Consensus::DEPLOYMENT_CSV].nTimeout = 1493596800;
 
         // The best chain should have at least this much work.
-        consensus.nMinimumChainWork =
-            uint256S("0x00000000000000000000000000000000000000000000002888c34d6"
-                     "1b53a244a");
+        consensus.nMinimumChainWork = uint256S(
+            "0000000000000000000000000000000000000000000000297b105869341c3527");
 
         // By default assume that the signatures in ancestors of this block are
         // valid.
-        consensus.defaultAssumeValid =
-            uint256S("0x000000000000b41f1f2ddf130df8824e2b61c0af809ff86dd5cadb3"
-                     "61d984ca7");
+        consensus.defaultAssumeValid = uint256S(
+            "000000000005b07ecf85563034d13efd81c1a29e47e22b20f4fc6919d5b09cd6");
 
-        // Aug, 1 hard fork
+        // August 1, 2017 hard fork
         consensus.uahfHeight = 1155876;
 
-        // Nov, 13 hard fork
+        // November 13, 2017 hard fork
         consensus.daaHeight = 1188697;
+
+        // May 15, 2018 hard fork
+        consensus.monolithActivationTime = 1526400000;
+
+        // Nov 15, 2018 hard fork
+        consensus.magneticAnomalyActivationTime = 1542300000;
 
         diskMagic[0] = 0x0b;
         diskMagic[1] = 0x11;
@@ -387,12 +400,11 @@ public:
             }};
 
         // Data as of block
-        // 00000000c2872f8f8a8935c8e3c5862be9038c97d4de2cf37ed496991166928a
-        // (height 1063660)
-        chainTxData = ChainTxData{1483546230, 12834668, 0.15};
+        // 000000000005b07ecf85563034d13efd81c1a29e47e22b20f4fc6919d5b09cd6
+        // (height 1223263)
+        chainTxData = ChainTxData{1522608381, 15052068, 0.15};
     }
 };
-static CTestNetParams testNetParams;
 
 /**
  * Regression test
@@ -439,11 +451,17 @@ public:
         // valid.
         consensus.defaultAssumeValid = uint256S("0x00");
 
-        // Hard fork is always enabled on regtest.
+        // UAHF is always enabled on regtest.
         consensus.uahfHeight = 0;
 
-        // Nov, 13 hard fork is always on on regtest.
+        // November 13, 2017 hard fork is always on on regtest.
         consensus.daaHeight = 0;
+
+        // May 15, 2018 hard fork.
+        consensus.monolithActivationTime = 1526400000;
+
+        // Nov 15, 2018 hard fork
+        consensus.magneticAnomalyActivationTime = 1542300000;
 
         diskMagic[0] = 0xfa;
         diskMagic[1] = 0xbf;
@@ -489,34 +507,26 @@ public:
         base58Prefixes[EXT_SECRET_KEY] = {0x04, 0x35, 0x83, 0x94};
         cashaddrPrefix = "bchreg";
     }
-
-    void UpdateBIP9Parameters(Consensus::DeploymentPos d, int64_t nStartTime,
-                              int64_t nTimeout) {
-        consensus.vDeployments[d].nStartTime = nStartTime;
-        consensus.vDeployments[d].nTimeout = nTimeout;
-    }
 };
 
-static CRegTestParams regTestParams;
-
-static CChainParams *pCurrentParams = 0;
+static std::unique_ptr<CChainParams> globalChainParams;
 
 const CChainParams &Params() {
-    assert(pCurrentParams);
-    return *pCurrentParams;
+    assert(globalChainParams);
+    return *globalChainParams;
 }
 
-CChainParams &Params(const std::string &chain) {
+std::unique_ptr<CChainParams> CreateChainParams(const std::string &chain) {
     if (chain == CBaseChainParams::MAIN) {
-        return mainParams;
+        return std::unique_ptr<CChainParams>(new CMainParams());
     }
 
     if (chain == CBaseChainParams::TESTNET) {
-        return testNetParams;
+        return std::unique_ptr<CChainParams>(new CTestNetParams());
     }
 
     if (chain == CBaseChainParams::REGTEST) {
-        return regTestParams;
+        return std::unique_ptr<CChainParams>(new CRegTestParams());
     }
 
     throw std::runtime_error(
@@ -525,10 +535,10 @@ CChainParams &Params(const std::string &chain) {
 
 void SelectParams(const std::string &network) {
     SelectBaseParams(network);
-    pCurrentParams = &Params(network);
+    globalChainParams = CreateChainParams(network);
 }
 
-void UpdateRegtestBIP9Parameters(Consensus::DeploymentPos d, int64_t nStartTime,
-                                 int64_t nTimeout) {
-    regTestParams.UpdateBIP9Parameters(d, nStartTime, nTimeout);
+void UpdateBIP9Parameters(Consensus::DeploymentPos d, int64_t nStartTime,
+                          int64_t nTimeout) {
+    globalChainParams->UpdateBIP9Parameters(d, nStartTime, nTimeout);
 }

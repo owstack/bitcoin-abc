@@ -9,23 +9,14 @@ from test_framework.test_framework import BitcoinTestFramework
 from test_framework.authproxy import JSONRPCException
 from test_framework.util import (
     assert_equal,
-    assert_raises_jsonrpc,
+    assert_raises_rpc_error,
     assert_is_hex_string,
     assert_is_hash_string,
-    start_nodes,
-    connect_nodes_bi,
 )
 
 
 class NamedArgumentTest(BitcoinTestFramework):
-
-    """
-    Test named arguments on RPC calls.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.setup_clean_chain = False
+    def set_test_params(self):
         self.num_nodes = 1
 
     def run_test(self):
@@ -33,8 +24,8 @@ class NamedArgumentTest(BitcoinTestFramework):
         h = node.help(command='getinfo')
         assert(h.startswith('getinfo\n'))
 
-        assert_raises_jsonrpc(
-            -8, 'Unknown named parameter', node.help, random='getinfo')
+        assert_raises_rpc_error(-8, 'Unknown named parameter',
+                                node.help, random='getinfo')
 
         h = node.getblockhash(height=0)
         node.getblock(blockhash=h)
@@ -45,6 +36,7 @@ class NamedArgumentTest(BitcoinTestFramework):
         assert_equal(node.echo(arg9=None), [None] * 10)
         assert_equal(node.echo(arg0=0, arg3=3, arg9=9),
                      [0] + [None] * 2 + [3] + [None] * 5 + [9])
+
 
 if __name__ == '__main__':
     NamedArgumentTest().main()

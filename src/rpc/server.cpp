@@ -7,6 +7,7 @@
 
 #include "base58.h"
 #include "config.h"
+#include "fs.h"
 #include "init.h"
 #include "random.h"
 #include "sync.h"
@@ -18,7 +19,6 @@
 
 #include <boost/algorithm/string/case_conv.hpp> // for to_upper()
 #include <boost/bind.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/signals2/signal.hpp>
 #include <boost/thread.hpp>
 
@@ -177,8 +177,8 @@ std::vector<uint8_t> ParseHexO(const UniValue &o, std::string strKey) {
 /**
  * Note: This interface may still be subject to change.
  */
-std::string CRPCTable::help(Config &config,
-                            const std::string &strCommand) const {
+std::string CRPCTable::help(Config &config, const std::string &strCommand,
+                            const JSONRPCRequest &helpreq) const {
     std::string strRet;
     std::string category;
     std::set<rpcfn_type> setDone;
@@ -191,16 +191,25 @@ std::string CRPCTable::help(Config &config,
             std::make_pair(mi->second->category + mi->first, mi->second));
     sort(vCommands.begin(), vCommands.end());
 
+    JSONRPCRequest jreq(helpreq);
+    jreq.fHelp = true;
+    jreq.params = UniValue();
+
     for (const std::pair<std::string, const CRPCCommand *> &command :
          vCommands) {
         const CRPCCommand *pcmd = command.second;
         std::string strMethod = pcmd->name;
         // We already filter duplicates, but these deprecated screw up the sort
         // order
-        if (strMethod.find("label") != std::string::npos) continue;
-        if ((strCommand != "" || pcmd->category == "hidden") &&
-            strMethod != strCommand)
+        if (strMethod.find("label") != std::string::npos) {
             continue;
+        }
+        if ((strCommand != "" || pcmd->category == "hidden") &&
+            strMethod != strCommand) {
+            continue;
+        }
+
+        jreq.strMethod = strMethod;
         try {
             JSONRPCRequest jreq;
             jreq.fHelp = true;
@@ -242,10 +251,11 @@ static UniValue help(Config &config, const JSONRPCRequest &jsonRequest) {
             "\"text\"     (string) The help text\n");
 
     std::string strCommand;
-    if (jsonRequest.params.size() > 0)
+    if (jsonRequest.params.size() > 0) {
         strCommand = jsonRequest.params[0].get_str();
+    }
 
-    return tableRPC.help(config, strCommand);
+    return tableRPC.help(config, strCommand, jsonRequest);
 }
 
 static UniValue stop(const Config &config, const JSONRPCRequest &jsonRequest) {
@@ -259,6 +269,22 @@ static UniValue stop(const Config &config, const JSONRPCRequest &jsonRequest) {
     return "Bitcoin server stopping";
 }
 
+static UniValue uptime(const Config &config,
+                       const JSONRPCRequest &jsonRequest) {
+    if (jsonRequest.fHelp || jsonRequest.params.size() > 1) {
+        throw std::runtime_error("uptime\n"
+                                 "\nReturns the total uptime of the server.\n"
+                                 "\nResult:\n"
+                                 "ttt        (numeric) The number of seconds "
+                                 "that the server has been running\n"
+                                 "\nExamples:\n" +
+                                 HelpExampleCli("uptime", "") +
+                                 HelpExampleRpc("uptime", ""));
+    }
+
+    return GetTime() - GetStartupTime();
+}
+
 /**
  * Call Table
  */
@@ -269,6 +295,7 @@ static const CRPCCommand vRPCCommands[] = {
     /* Overall control/query calls */
     { "control",            "help",                   help,                   true,  {"command"}  },
     { "control",            "stop",                   stop,                   true,  {}  },
+    { "control",            "uptime",                 uptime,                 true,  {}  },
 };
 // clang-format on
 
@@ -304,20 +331,20 @@ bool CRPCTable::appendCommand(const std::string &name,
 }
 
 bool StartRPC() {
-    LogPrint("rpc", "Starting RPC\n");
+    LogPrint(BCLog::RPC, "Starting RPC\n");
     fRPCRunning = true;
     g_rpcSignals.Started();
     return true;
 }
 
 void InterruptRPC() {
-    LogPrint("rpc", "Interrupting RPC\n");
+    LogPrint(BCLog::RPC, "Interrupting RPC\n");
     // Interrupt e.g. running longpolls
     fRPCRunning = false;
 }
 
 void StopRPC() {
-    LogPrint("rpc", "Stopping RPC\n");
+    LogPrint(BCLog::RPC, "Stopping RPC\n");
     deadlineTimers.clear();
     DeleteAuthCookie();
     g_rpcSignals.Stopped();
@@ -361,7 +388,7 @@ void JSONRPCRequest::parse(const UniValue &valRequest) {
         throw JSONRPCError(RPC_INVALID_REQUEST, "Method must be a string");
     strMethod = valMethod.get_str();
     if (strMethod != "getblocktemplate")
-        LogPrint("rpc", "ThreadRPCServer method=%s\n",
+        LogPrint(BCLog::RPC, "ThreadRPCServer method=%s\n",
                  SanitizeString(strMethod));
 
     // Parse params
@@ -375,10 +402,10 @@ void JSONRPCRequest::parse(const UniValue &valRequest) {
                            "Params must be an array or object");
 }
 
-static UniValue JSONRPCExecOne(Config &config, const UniValue &req) {
+static UniValue JSONRPCExecOne(Config &config, JSONRPCRequest jreq,
+                               const UniValue &req) {
     UniValue rpc_result(UniValue::VOBJ);
 
-    JSONRPCRequest jreq;
     try {
         jreq.parse(req);
 
@@ -394,10 +421,11 @@ static UniValue JSONRPCExecOne(Config &config, const UniValue &req) {
     return rpc_result;
 }
 
-std::string JSONRPCExecBatch(Config &config, const UniValue &vReq) {
+std::string JSONRPCExecBatch(Config &config, const JSONRPCRequest &jreq,
+                             const UniValue &vReq) {
     UniValue ret(UniValue::VARR);
-    for (unsigned int reqIdx = 0; reqIdx < vReq.size(); reqIdx++) {
-        ret.push_back(JSONRPCExecOne(config, vReq[reqIdx]));
+    for (size_t i = 0; i < vReq.size(); i++) {
+        ret.push_back(JSONRPCExecOne(config, jreq, vReq[i]));
     }
 
     return ret.write() + "\n";
@@ -518,8 +546,8 @@ void RPCRunLater(const std::string &name, std::function<void(void)> func,
         throw JSONRPCError(RPC_INTERNAL_ERROR,
                            "No timer handler registered for RPC");
     deadlineTimers.erase(name);
-    LogPrint("rpc", "queue run of timer %s in %i seconds (using %s)\n", name,
-             nSeconds, timerInterface->Name());
+    LogPrint(BCLog::RPC, "queue run of timer %s in %i seconds (using %s)\n",
+             name, nSeconds, timerInterface->Name());
     deadlineTimers.emplace(
         name, std::unique_ptr<RPCTimerBase>(
                   timerInterface->NewTimer(func, nSeconds * 1000)));

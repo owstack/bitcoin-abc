@@ -81,7 +81,7 @@ BOOST_AUTO_TEST_CASE(test_antireplay) {
     CMutableTransaction tx;
     tx.nVersion = 1;
     tx.vin.resize(1);
-    tx.vin[0].prevout.hash = GetRandHash();
+    tx.vin[0].prevout.hash = InsecureRand256();
     tx.vin[0].prevout.n = 0;
     tx.vin[0].scriptSig = CScript();
     tx.vout.resize(1);
@@ -91,22 +91,24 @@ BOOST_AUTO_TEST_CASE(test_antireplay) {
     {
         // Base transaction is valid.
         CValidationState state;
-        BOOST_CHECK(ContextualCheckTransaction(config, tx, state, nSunsetHeight,
-                                               nUAHFStartTime));
+        BOOST_CHECK(ContextualCheckTransaction(config, CTransaction(tx), state,
+                                               nSunsetHeight, nUAHFStartTime));
     }
 
     {
         // Base transaction is still valid after sunset.
         CValidationState state;
-        BOOST_CHECK(ContextualCheckTransaction(
-            config, tx, state, nSunsetHeight + 1, nUAHFStartTime));
+        BOOST_CHECK(ContextualCheckTransaction(config, CTransaction(tx), state,
+                                               nSunsetHeight + 1,
+                                               nUAHFStartTime));
     }
 
     {
         // Base transaction is valid before the fork.
         CValidationState state;
-        BOOST_CHECK(ContextualCheckTransaction(
-            config, tx, state, nUAHFHeight - 1, nUAHFStartTime - 1));
+        BOOST_CHECK(ContextualCheckTransaction(config, CTransaction(tx), state,
+                                               nUAHFHeight - 1,
+                                               nUAHFStartTime - 1));
     }
 
     tx.vout[0].scriptPubKey = CScript() << OP_RETURN << OP_0;
@@ -114,8 +116,8 @@ BOOST_AUTO_TEST_CASE(test_antireplay) {
     {
         // Wrong commitment, still valid.
         CValidationState state;
-        BOOST_CHECK(ContextualCheckTransaction(config, tx, state, nSunsetHeight,
-                                               nUAHFStartTime));
+        BOOST_CHECK(ContextualCheckTransaction(config, CTransaction(tx), state,
+                                               nSunsetHeight, nUAHFStartTime));
     }
 
     tx.vout[0].scriptPubKey = CScript() << OP_RETURN
@@ -124,15 +126,15 @@ BOOST_AUTO_TEST_CASE(test_antireplay) {
     {
         // Anti replay commitment, not valid anymore.
         CValidationState state;
-        BOOST_CHECK(!ContextualCheckTransaction(config, tx, state, nUAHFHeight,
-                                                nUAHFStartTime));
+        BOOST_CHECK(!ContextualCheckTransaction(config, CTransaction(tx), state,
+                                                nUAHFHeight, nUAHFStartTime));
         BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txn-replay");
     }
 
     {
         // Anti replay commitment, not valid anymore.
         CValidationState state;
-        BOOST_CHECK(!ContextualCheckTransaction(config, tx, state,
+        BOOST_CHECK(!ContextualCheckTransaction(config, CTransaction(tx), state,
                                                 nSunsetHeight, nUAHFStartTime));
         BOOST_CHECK_EQUAL(state.GetRejectReason(), "bad-txn-replay");
     }
@@ -141,14 +143,15 @@ BOOST_AUTO_TEST_CASE(test_antireplay) {
         // Anti replay commitment, disabled before start time.
         CValidationState state;
         BOOST_CHECK(ContextualCheckTransaction(
-            config, tx, state, nUAHFHeight - 1, nUAHFStartTime));
+            config, CTransaction(tx), state, nUAHFHeight - 1, nUAHFStartTime));
     }
 
     {
         // Anti replay commitment, disabled after sunset.
         CValidationState state;
-        BOOST_CHECK(ContextualCheckTransaction(
-            config, tx, state, nSunsetHeight + 1, nUAHFStartTime));
+        BOOST_CHECK(ContextualCheckTransaction(config, CTransaction(tx), state,
+                                               nSunsetHeight + 1,
+                                               nUAHFStartTime));
     }
 }
 

@@ -12,9 +12,7 @@ from test_framework.util import *
 
 
 class InvalidateTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
+    def set_test_params(self):
         self.setup_clean_chain = True
         self.num_nodes = 3
 
@@ -69,6 +67,7 @@ class InvalidateTest(BitcoinTestFramework):
         if node1height < 4:
             raise AssertionError(
                 "Node 1 reorged to a lower height: %d" % node1height)
+
 
 if __name__ == '__main__':
     InvalidateTest().main()

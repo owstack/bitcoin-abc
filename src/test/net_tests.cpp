@@ -1,11 +1,11 @@
 // Copyright (c) 2012-2016 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-#include "net.h"
 #include "addrman.h"
 #include "chainparams.h"
 #include "config.h"
 #include "hash.h"
+#include "net.h"
 #include "netbase.h"
 #include "serialize.h"
 #include "streams.h"
@@ -105,7 +105,7 @@ BOOST_AUTO_TEST_CASE(caddrdb_read) {
     CDataStream ssPeers2 = AddrmanToStream(addrmanUncorrupted);
 
     CAddrMan addrman2;
-    CAddrDB adb;
+    CAddrDB adb(Params());
     BOOST_CHECK(addrman2.size() == 0);
     adb.Read(addrman2, ssPeers2);
     BOOST_CHECK(addrman2.size() == 3);
@@ -137,7 +137,7 @@ BOOST_AUTO_TEST_CASE(caddrdb_read_corrupted) {
     CDataStream ssPeers2 = AddrmanToStream(addrmanCorrupted);
 
     CAddrMan addrman2;
-    CAddrDB adb;
+    CAddrDB adb(Params());
     BOOST_CHECK(addrman2.size() == 0);
     adb.Read(addrman2, ssPeers2);
     BOOST_CHECK(addrman2.size() == 0);
@@ -191,11 +191,11 @@ BOOST_AUTO_TEST_CASE(test_userAgentLength) {
                                  "very very very very very very very very very "
                                  "very very very very very very very very very "
                                  "very very very very very very long comment";
-    ForceSetMultiArg("-uacomment", long_uacomment);
+    gArgs.ForceSetMultiArg("-uacomment", long_uacomment);
 
     BOOST_CHECK_EQUAL(userAgent(config).size(), MAX_SUBVERSION_LENGTH);
     BOOST_CHECK_EQUAL(userAgent(config),
-                      "/Bitcoin ABC:0.16.2(EB8.0; very very very very very "
+                      "/Bitcoin ABC:0.17.0(EB8.0; very very very very very "
                       "very very very very very very very very very very very "
                       "very very very very very very very very very very very "
                       "very very very very very very very very very very very "

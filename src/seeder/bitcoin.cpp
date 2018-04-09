@@ -204,7 +204,7 @@ class CSeederNode {
                                           vRecv.begin() + nHeaderSize);
             CMessageHeader hdr(netMagic);
             vRecv >> hdr;
-            if (!hdr.IsValid(netMagic)) {
+            if (!hdr.IsValidWithoutConfig(netMagic)) {
                 // printf("%s: BAD (invalid header)\n", ToString(you).c_str());
                 ban = 100000;
                 return true;
@@ -263,9 +263,9 @@ public:
 
         bool res = true;
         int64_t now;
-        while (now = time(nullptr), ban == 0 &&
-                                        (doneAfter == 0 || doneAfter > now) &&
-                                        sock != INVALID_SOCKET) {
+        while (now = time(nullptr),
+               ban == 0 && (doneAfter == 0 || doneAfter > now) &&
+                   sock != INVALID_SOCKET) {
             char pchBuf[0x10000];
             fd_set set;
             FD_ZERO(&set);

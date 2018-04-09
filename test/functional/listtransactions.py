@@ -19,16 +19,9 @@ def txFromHex(hexstring):
 
 
 class ListTransactionsTest(BitcoinTestFramework):
-
-    def __init__(self):
-        super().__init__()
-        self.num_nodes = 4
-        self.setup_clean_chain = False
-
-    def setup_nodes(self):
-        # This test requires mocktime
-        enable_mocktime()
-        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir)
+    def set_test_params(self):
+        self.num_nodes = 2
+        self.enable_mocktime()
 
     def run_test(self):
         # Simple send, 0 to 1:
@@ -102,8 +95,9 @@ class ListTransactionsTest(BitcoinTestFramework):
             len(self.nodes[0].listtransactions("watchonly", 100, 0, False)) == 0)
         assert_array_result(
             self.nodes[0].listtransactions("watchonly", 100, 0, True),
-                           {"category": "receive", "amount": Decimal("0.1")},
-                           {"txid": txid, "account": "watchonly"})
+            {"category": "receive", "amount": Decimal("0.1")},
+            {"txid": txid, "account": "watchonly"})
+
 
 if __name__ == '__main__':
     ListTransactionsTest().main()

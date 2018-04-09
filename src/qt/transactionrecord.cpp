@@ -17,12 +17,8 @@
  * Return positive answer if transaction should be shown in list.
  */
 bool TransactionRecord::showTransaction(const CWalletTx &wtx) {
-    if (wtx.IsCoinBase()) {
-        // Ensures we show generated coins / mined transactions at depth 1
-        if (!wtx.IsInMainChain()) {
-            return false;
-        }
-    }
+    // There are currently no cases where we hide transactions, but we may want
+    // to use this in the future for things like RBF.
     return true;
 }
 
@@ -44,7 +40,7 @@ TransactionRecord::decomposeTransaction(const CWallet *wallet,
         //
         // Credit
         //
-        for (unsigned int i = 0; i < wtx.tx->vout.size(); i++) {
+        for (size_t i = 0; i < wtx.tx->vout.size(); i++) {
             const CTxOut &txout = wtx.tx->vout[i];
             isminetype mine = wallet->IsMine(txout);
             if (mine) {
@@ -103,7 +99,7 @@ TransactionRecord::decomposeTransaction(const CWallet *wallet,
             //
             Amount nTxFee = nDebit - wtx.tx->GetValueOut();
 
-            for (unsigned int nOut = 0; nOut < wtx.tx->vout.size(); nOut++) {
+            for (size_t nOut = 0; nOut < wtx.tx->vout.size(); nOut++) {
                 const CTxOut &txout = wtx.tx->vout[nOut];
                 TransactionRecord sub(hash, nTime);
                 sub.idx = nOut;
