@@ -4832,8 +4832,8 @@ bool CVerifyDB::VerifyDB(const Config &config, CCoinsView *coinsview,
                     pindex->nHeight, pindex->GetBlockHash().ToString());
             }
             // just check, do not update the address index
-            if (!ConnectBlock(config, block, state, pindex, coins,
-                              chainparams, true)) {
+
+            if (!ConnectBlock(config, block, state, pindex, coins, true)) {
                 return error(
                     "VerifyDB(): *** found unconnectable block at %d, hash=%s",
                     pindex->nHeight, pindex->GetBlockHash().ToString());
@@ -5068,17 +5068,17 @@ bool InitBlockIndex(const Config &config) {
     LogPrintf("%s: transaction index %s\n", __func__, fTxIndex ? "enabled" : "disabled");
 
     // Use the provided setting for -addressindex in the new database
-    fAddressIndex = GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX);
+    fAddressIndex = gArgs.GetBoolArg("-addressindex", DEFAULT_ADDRESSINDEX);
     pblocktree->WriteFlag("addressindex", fAddressIndex);
     LogPrintf("%s: address index %s\n", __func__, fAddressIndex ? "enabled" : "disabled");
 
     // Use the provided setting for -timestampindex in the new database
-    fTimestampIndex = GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX);
+    fTimestampIndex = gArgs.GetBoolArg("-timestampindex", DEFAULT_TIMESTAMPINDEX);
     pblocktree->WriteFlag("timestampindex", fTimestampIndex);
     LogPrintf("%s: timestamp index %s\n", __func__, fTimestampIndex ? "enabled" : "disabled");
 
     // Use the provided setting for -spentindex in the new database
-    fSpentIndex = GetBoolArg("-spentindex", DEFAULT_SPENTINDEX);
+    fSpentIndex = gArgs.GetBoolArg("-spentindex", DEFAULT_SPENTINDEX);
     pblocktree->WriteFlag("spentindex", fSpentIndex);
     LogPrintf("%s: spent index %s\n", __func__, fSpentIndex ? "enabled" : "disabled");
 

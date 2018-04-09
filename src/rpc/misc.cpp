@@ -644,7 +644,7 @@ bool getAddressFromIndex(const int &type, const uint160 &hash, std::string &addr
 bool getAddressesFromParams(const UniValue& params, std::vector<std::pair<uint160, int> > &addresses)
 {
     if (params[0].isStr()) {
-        CTxDestination dest = DecodeDestination(params[0].get_str());
+        CTxDestination dest = DecodeDestination(params[0].get_str(), Params());
         bool isValid = IsValidDestination(dest);
         if (!isValid) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
@@ -667,7 +667,7 @@ bool getAddressesFromParams(const UniValue& params, std::vector<std::pair<uint16
 
         for (std::vector<UniValue>::iterator it = values.begin(); it != values.end(); ++it) {
 
-            CTxDestination dest = DecodeDestination(it->get_str());
+            CTxDestination dest = DecodeDestination(it->get_str(), Params());
             bool isValid = IsValidDestination(dest);
             if (!isValid) {
                 throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
