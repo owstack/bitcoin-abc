@@ -1195,7 +1195,6 @@ bool GetAddressUnspent(uint160 addressHash, int type,
  * placed in hashBlock.
  */
 bool GetTransaction(const Config &config, const TxId &txid,
->>>>>>> abc/master
                     CTransactionRef &txOut, uint256 &hashBlock,
                     bool fAllowSlow) {
     CBlockIndex *pindexSlow = nullptr;
@@ -1981,7 +1980,7 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
 
             if (fSpentIndex) {
                 // undo and delete the spent index
-                spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.hash, input.prevout.n), CSpentIndexValue()));
+                spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.GetTxId(), input.prevout.GetN()), CSpentIndexValue()));
             }
 
             if (fAddressIndex) {
@@ -1994,7 +1993,7 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
 
                     // restore unspent index
                     // WARNING: UndoCoinSpend NOW RETURNS A COIN INSTEAD OF A CTxInUndo (UNDO.nHeight NO LONGER EXITS, NOW IT'S GETHEIGHT)
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), input.prevout.hash, input.prevout.n), CAddressUnspentValue(prevout.nValue.GetSatoshis(), prevout.scriptPubKey, undo.GetHeight())));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue(prevout.nValue.GetSatoshis(), prevout.scriptPubKey, undo.GetHeight())));
 
 
                 } else if (prevout.scriptPubKey.IsPayToPublicKeyHash()) {
@@ -2005,7 +2004,7 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
 
                     // restore unspent index
                     // WARNING: UndoCoinSpend NOW RETURNS A COIN INSTEAD OF A CTxInUndo (UNDO.nHeight NO LONGER EXITS, NOW IT'S GETHEIGHT)
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), input.prevout.hash, input.prevout.n), CAddressUnspentValue(prevout.nValue.GetSatoshis(), prevout.scriptPubKey, undo.GetHeight())));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue(prevout.nValue.GetSatoshis(), prevout.scriptPubKey, undo.GetHeight())));
 
                 } else {
                     continue;
@@ -2330,7 +2329,6 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
     //     const uint256 txhash = tx.GetHash();
     for (const auto &ptx : block.vtx) {
         const CTransaction &tx = *ptx;
-        const uint256 txhash = tx.GetHash();
 
         nInputs += tx.vin.size();
 
@@ -2347,8 +2345,11 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
         }
     }
 
+    size_t i = 0;
     for (const auto &ptx : block.vtx) {
         const CTransaction &tx = *ptx;
+        const uint256 txhash = tx.GetHash();
+
         if (tx.IsCoinBase()) {
             continue;
         }
@@ -2398,13 +2399,13 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
                     addressIndex.push_back(std::make_pair(CAddressIndexKey(addressType, hashBytes, pindex->nHeight, i, txhash, j, true), prevout.nValue.GetSatoshis() * -1));
 
                     // remove address from unspent index
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(addressType, hashBytes, input.prevout.hash, input.prevout.n), CAddressUnspentValue()));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(addressType, hashBytes, input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue()));
                 }
 
                 if (fSpentIndex) {
                     // add the spent index to determine the txid and input that spent an output
                     // and to find the amount and address from an input
-                    spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.hash, input.prevout.n), CSpentIndexValue(txhash, j, pindex->nHeight, prevout.nValue.GetSatoshis(), addressType, hashBytes)));
+                    spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.GetTxId(), input.prevout.GetN()), CSpentIndexValue(txhash, j, pindex->nHeight, prevout.nValue.GetSatoshis(), addressType, hashBytes)));
                 }
             }
         }
@@ -2475,6 +2476,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
         if (!fIsMagneticAnomalyEnabled) {
             AddCoins(view, tx, pindex->nHeight);
         }
+        ++i;
     }
 
     int64_t nTime3 = GetTimeMicros();
