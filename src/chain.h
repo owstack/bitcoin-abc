@@ -130,17 +130,23 @@ struct CDiskBlockPos {
     }
 };
 
-enum BlockStatus : uint32_t {
-    //! Unused.
-    BLOCK_VALID_UNKNOWN = 0,
+enum class BlockValidity : uint32_t {
+    /**
+     * Unused.
+     */
+    UNKNOWN = 0,
 
-    //! Parsed, version ok, hash satisfies claimed PoW, 1 <= vtx count <= max,
-    //! timestamp not in future
-    BLOCK_VALID_HEADER = 1,
+    /**
+     * Parsed, version ok, hash satisfies claimed PoW, 1 <= vtx count <= max,
+     * timestamp not in future.
+     */
+    HEADER = 1,
 
-    //! All parent headers found, difficulty matches, timestamp >= median
-    //! previous, checkpoint. Implies all parents are also at least TREE.
-    BLOCK_VALID_TREE = 2,
+    /**
+     * All parent headers found, difficulty matches, timestamp >= median
+     * previous, checkpoint. Implies all parents are also at least TREE.
+     */
+    TREE = 2,
 
     /**
      * Only first tx is coinbase, 2 <= coinbase input script length <= 100,
@@ -149,32 +155,123 @@ enum BlockStatus : uint32_t {
      * When all parent blocks also have TRANSACTIONS, CBlockIndex::nChainTx will
      * be set.
      */
-    BLOCK_VALID_TRANSACTIONS = 3,
+    TRANSACTIONS = 3,
 
-    //! Outputs do not overspend inputs, no double spends, coinbase output ok,
-    //! no immature coinbase spends, BIP30.
-    //! Implies all parents are also at least CHAIN.
-    BLOCK_VALID_CHAIN = 4,
+    /**
+     * Outputs do not overspend inputs, no double spends, coinbase output ok, no
+     * immature coinbase spends, BIP30.
+     * Implies all parents are also at least CHAIN.
+     */
+    CHAIN = 4,
 
-    //! Scripts & signatures ok. Implies all parents are also at least SCRIPTS.
-    BLOCK_VALID_SCRIPTS = 5,
+    /**
+     * Scripts & signatures ok. Implies all parents are also at least SCRIPTS.
+     */
+    SCRIPTS = 5,
+};
 
-    //! All validity bits.
-    BLOCK_VALID_MASK = BLOCK_VALID_HEADER | BLOCK_VALID_TREE |
-                       BLOCK_VALID_TRANSACTIONS | BLOCK_VALID_CHAIN |
-                       BLOCK_VALID_SCRIPTS,
+struct BlockStatus {
+private:
+    uint32_t status;
 
-    //!< full block available in blk*.dat
-    BLOCK_HAVE_DATA = 8,
-    //!< undo data available in rev*.dat
-    BLOCK_HAVE_UNDO = 16,
-    BLOCK_HAVE_MASK = BLOCK_HAVE_DATA | BLOCK_HAVE_UNDO,
+    explicit BlockStatus(uint32_t nStatusIn) : status(nStatusIn) {}
 
-    //!< stage after last reached validness failed
-    BLOCK_FAILED_VALID = 32,
-    //!< descends from failed block
-    BLOCK_FAILED_CHILD = 64,
-    BLOCK_FAILED_MASK = BLOCK_FAILED_VALID | BLOCK_FAILED_CHILD,
+    static const uint32_t VALIDITY_MASK = 0x07;
+
+    // Full block available in blk*.dat
+    static const uint32_t HAS_DATA_FLAG = 0x08;
+    // Undo data available in rev*.dat
+    static const uint32_t HAS_UNDO_FLAG = 0x10;
+
+    // The block is invalid.
+    static const uint32_t FAILED_FLAG = 0x20;
+    // The block has an invalid parent.
+    static const uint32_t FAILED_PARENT_FLAG = 0x40;
+
+    // Mask used to check if the block failed.
+    static const uint32_t INVALID_MASK = FAILED_FLAG | FAILED_PARENT_FLAG;
+
+    // The block is being parked for some reason. It will be reconsidered if its
+    // chains grows.
+    static const uint32_t PARKED_FLAG = 0x80;
+    // One of the block's parent is parked.
+    static const uint32_t PARKED_PARENT_FLAG = 0x100;
+
+    // Mask used to check for parked blocks.
+    static const uint32_t PARKED_MASK = PARKED_FLAG | PARKED_PARENT_FLAG;
+
+public:
+    explicit BlockStatus() : status(0) {}
+
+    BlockValidity getValidity() const {
+        return BlockValidity(status & VALIDITY_MASK);
+    }
+
+    BlockStatus withValidity(BlockValidity validity) const {
+        return BlockStatus((status & ~VALIDITY_MASK) | uint32_t(validity));
+    }
+
+    bool hasData() const { return status & HAS_DATA_FLAG; }
+    BlockStatus withData(bool hasData = true) const {
+        return BlockStatus((status & ~HAS_DATA_FLAG) |
+                           (hasData ? HAS_DATA_FLAG : 0));
+    }
+
+    bool hasUndo() const { return status & HAS_UNDO_FLAG; }
+    BlockStatus withUndo(bool hasUndo = true) const {
+        return BlockStatus((status & ~HAS_UNDO_FLAG) |
+                           (hasUndo ? HAS_UNDO_FLAG : 0));
+    }
+
+    bool hasFailed() const { return status & FAILED_FLAG; }
+    BlockStatus withFailed(bool hasFailed = true) const {
+        return BlockStatus((status & ~FAILED_FLAG) |
+                           (hasFailed ? FAILED_FLAG : 0));
+    }
+
+    bool hasFailedParent() const { return status & FAILED_PARENT_FLAG; }
+    BlockStatus withFailedParent(bool hasFailedParent = true) const {
+        return BlockStatus((status & ~FAILED_PARENT_FLAG) |
+                           (hasFailedParent ? FAILED_PARENT_FLAG : 0));
+    }
+
+    bool isParked() const { return status & PARKED_FLAG; }
+    BlockStatus withParked(bool parked = true) const {
+        return BlockStatus((status & ~PARKED_FLAG) |
+                           (parked ? PARKED_FLAG : 0));
+    }
+
+    bool hasParkedParent() const { return status & PARKED_PARENT_FLAG; }
+    BlockStatus withParkedParent(bool parkedParent = true) const {
+        return BlockStatus((status & ~PARKED_PARENT_FLAG) |
+                           (parkedParent ? PARKED_PARENT_FLAG : 0));
+    }
+
+    /**
+     * Check whether this block index entry is valid up to the passed validity
+     * level.
+     */
+    bool isValid(enum BlockValidity nUpTo = BlockValidity::TRANSACTIONS) const {
+        if (isInvalid()) {
+            return false;
+        }
+
+        return getValidity() >= nUpTo;
+    }
+
+    bool isInvalid() const { return status & INVALID_MASK; }
+    BlockStatus withClearedFailureFlags() const {
+        return BlockStatus(status & ~INVALID_MASK);
+    }
+
+    bool isOnParkedChain() const { return status & PARKED_MASK; }
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream &s, Operation ser_action) {
+        READWRITE(VARINT(status));
+    }
 };
 
 /**
@@ -224,7 +321,7 @@ public:
     unsigned int nChainTx;
 
     //! Verification status of this block. See enum BlockStatus
-    uint32_t nStatus;
+    BlockStatus nStatus;
 
     //! block header
     int32_t nVersion;
@@ -254,7 +351,7 @@ public:
         nChainWork = arith_uint256();
         nTx = 0;
         nChainTx = 0;
-        nStatus = 0;
+        nStatus = BlockStatus();
         nSequenceId = 0;
         nTimeMax = 0;
 
@@ -285,7 +382,7 @@ public:
 
     CDiskBlockPos GetBlockPos() const {
         CDiskBlockPos ret;
-        if (nStatus & BLOCK_HAVE_DATA) {
+        if (nStatus.hasData()) {
             ret.nFile = nFile;
             ret.nPos = nDataPos;
         }
@@ -294,7 +391,7 @@ public:
 
     CDiskBlockPos GetUndoPos() const {
         CDiskBlockPos ret;
-        if (nStatus & BLOCK_HAVE_UNDO) {
+        if (nStatus.hasUndo()) {
             ret.nFile = nFile;
             ret.nPos = nUndoPos;
         }
@@ -320,7 +417,11 @@ public:
 
     int64_t GetBlockTimeMax() const { return int64_t(nTimeMax); }
 
-    int64_t GetHeaderTimeReceived() const { return nTimeReceived; }
+    int64_t GetHeaderReceivedTime() const { return nTimeReceived; }
+
+    int64_t GetReceivedTimeDiff() const {
+        return GetHeaderReceivedTime() - GetBlockTime();
+    }
 
     enum { nMedianTimeSpan = 11 };
 
@@ -347,28 +448,24 @@ public:
 
     //! Check whether this block index entry is valid up to the passed validity
     //! level.
-    bool IsValid(enum BlockStatus nUpTo = BLOCK_VALID_TRANSACTIONS) const {
-        // Only validity flags allowed.
-        assert(!(nUpTo & ~BLOCK_VALID_MASK));
-        if (nStatus & BLOCK_FAILED_MASK) {
-            return false;
-        }
-        return ((nStatus & BLOCK_VALID_MASK) >= nUpTo);
+    bool IsValid(enum BlockValidity nUpTo = BlockValidity::TRANSACTIONS) const {
+        return nStatus.isValid(nUpTo);
     }
 
     //! Raise the validity level of this block index entry.
     //! Returns true if the validity was changed.
-    bool RaiseValidity(enum BlockStatus nUpTo) {
+    bool RaiseValidity(enum BlockValidity nUpTo) {
         // Only validity flags allowed.
-        assert(!(nUpTo & ~BLOCK_VALID_MASK));
-        if (nStatus & BLOCK_FAILED_MASK) {
+        if (nStatus.isInvalid()) {
             return false;
         }
-        if ((nStatus & BLOCK_VALID_MASK) < nUpTo) {
-            nStatus = (nStatus & ~BLOCK_VALID_MASK) | nUpTo;
-            return true;
+
+        if (nStatus.getValidity() >= nUpTo) {
+            return false;
         }
-        return false;
+
+        nStatus = nStatus.withValidity(nUpTo);
+        return true;
     }
 
     //! Build the skiplist pointer for this entry.
@@ -427,15 +524,15 @@ public:
         }
 
         READWRITE(VARINT(nHeight));
-        READWRITE(VARINT(nStatus));
+        READWRITE(nStatus);
         READWRITE(VARINT(nTx));
-        if (nStatus & (BLOCK_HAVE_DATA | BLOCK_HAVE_UNDO)) {
+        if (nStatus.hasData() || nStatus.hasUndo()) {
             READWRITE(VARINT(nFile));
         }
-        if (nStatus & BLOCK_HAVE_DATA) {
+        if (nStatus.hasData()) {
             READWRITE(VARINT(nDataPos));
         }
-        if (nStatus & BLOCK_HAVE_UNDO) {
+        if (nStatus.hasUndo()) {
             READWRITE(VARINT(nUndoPos));
         }
 

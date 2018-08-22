@@ -10,17 +10,14 @@
 #include <atomic>
 #include <cstdint>
 #include <list>
+#include <mutex>
 #include <string>
-
-#include <boost/thread/mutex.hpp>
 
 static const bool DEFAULT_LOGTIMEMICROS = false;
 static const bool DEFAULT_LOGIPS = false;
 static const bool DEFAULT_LOGTIMESTAMPS = true;
 
 extern bool fLogIPs;
-
-extern std::atomic<uint32_t> logCategories;
 
 namespace BCLog {
 
@@ -53,7 +50,7 @@ enum LogFlags : uint32_t {
 class Logger {
 private:
     FILE *fileout = nullptr;
-    boost::mutex mutexDebugLog;
+    std::mutex mutexDebugLog;
     std::list<std::string> vMsgsBeforeOpenLog;
 
     /**
@@ -61,6 +58,12 @@ private:
      * timestamp when multiple calls are made that don't end in a newline.
      */
     std::atomic_bool fStartedNewLine{true};
+
+    /**
+     * Log categories bitfield. Leveldb/libevent need special handling if their
+     * flags are changed at runtime.
+     */
+    std::atomic<uint32_t> logCategories{0};
 
     std::string LogTimestampStr(const std::string &str);
 
@@ -80,6 +83,15 @@ public:
 
     void OpenDebugLog();
     void ShrinkDebugFile();
+
+    void EnableCategory(LogFlags category);
+    void DisableCategory(LogFlags category);
+
+    /** Return true if log accepts specified category */
+    bool WillLogCategory(LogFlags category) const;
+
+    /** Default for whether ShrinkDebugFile should be run */
+    bool DefaultShrinkDebugFile() const;
 };
 
 } // namespace BCLog
@@ -87,15 +99,15 @@ public:
 BCLog::Logger &GetLogger();
 
 /** Return true if log accepts specified category */
-static inline bool LogAcceptCategory(uint32_t category) {
-    return (logCategories.load(std::memory_order_relaxed) & category) != 0;
+static inline bool LogAcceptCategory(BCLog::LogFlags category) {
+    return GetLogger().WillLogCategory(category);
 }
 
 /** Returns a string with the supported log categories */
 std::string ListLogCategories();
 
-/** Return true if str parses as a log category and set the flags in f */
-bool GetLogCategory(uint32_t *f, const std::string *str);
+/** Return true if str parses as a log category and set the flag */
+bool GetLogCategory(BCLog::LogFlags &flag, const std::string &str);
 
 #define LogPrint(category, ...)                                                \
     do {                                                                       \

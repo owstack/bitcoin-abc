@@ -6,7 +6,6 @@
 
 #include "logging.h"
 #include "util.h"
-#include "utilstrencodings.h"
 #include "utiltime.h"
 
 bool fLogIPs = DEFAULT_LOGIPS;
@@ -29,18 +28,12 @@ BCLog::Logger &GetLogger() {
     return *logger;
 }
 
-/**
- * Log categories bitfield. Leveldb/libevent need special handling if their
- * flags are changed at runtime.
- */
-std::atomic<uint32_t> logCategories(0);
-
 static int FileWriteStr(const std::string &str, FILE *fp) {
     return fwrite(str.data(), 1, str.size(), fp);
 }
 
 void BCLog::Logger::OpenDebugLog() {
-    boost::mutex::scoped_lock scoped_lock(mutexDebugLog);
+    std::lock_guard<std::mutex> scoped_lock(mutexDebugLog);
 
     assert(fileout == nullptr);
     fs::path pathDebug = GetDataDir() / "debug.log";
@@ -57,7 +50,7 @@ void BCLog::Logger::OpenDebugLog() {
 }
 
 struct CLogCategoryDesc {
-    uint32_t flag;
+    BCLog::LogFlags flag;
     std::string category;
 };
 
@@ -88,17 +81,15 @@ const CLogCategoryDesc LogCategories[] = {
     {BCLog::ALL, "all"},
 };
 
-bool GetLogCategory(uint32_t *f, const std::string *str) {
-    if (f && str) {
-        if (*str == "") {
-            *f = BCLog::ALL;
+bool GetLogCategory(BCLog::LogFlags &flag, const std::string &str) {
+    if (str == "") {
+        flag = BCLog::ALL;
+        return true;
+    }
+    for (const CLogCategoryDesc &category_desc : LogCategories) {
+        if (category_desc.category == str) {
+            flag = category_desc.flag;
             return true;
-        }
-        for (unsigned int i = 0; i < ARRAYLEN(LogCategories); i++) {
-            if (LogCategories[i].category == *str) {
-                *f = LogCategories[i].flag;
-                return true;
-            }
         }
     }
     return false;
@@ -107,12 +98,12 @@ bool GetLogCategory(uint32_t *f, const std::string *str) {
 std::string ListLogCategories() {
     std::string ret;
     int outcount = 0;
-    for (unsigned int i = 0; i < ARRAYLEN(LogCategories); i++) {
+    for (const CLogCategoryDesc &category_desc : LogCategories) {
         // Omit the special cases.
-        if (LogCategories[i].flag != BCLog::NONE &&
-            LogCategories[i].flag != BCLog::ALL) {
+        if (category_desc.flag != BCLog::NONE &&
+            category_desc.flag != BCLog::ALL) {
             if (outcount != 0) ret += ", ";
-            ret += LogCategories[i].category;
+            ret += category_desc.category;
             outcount++;
         }
     }
@@ -159,7 +150,7 @@ int BCLog::Logger::LogPrintStr(const std::string &str) {
         ret = fwrite(strTimestamped.data(), 1, strTimestamped.size(), stdout);
         fflush(stdout);
     } else if (fPrintToDebugLog) {
-        boost::mutex::scoped_lock scoped_lock(mutexDebugLog);
+        std::lock_guard<std::mutex> scoped_lock(mutexDebugLog);
 
         // Buffer if we haven't opened the log yet.
         if (fileout == nullptr) {
@@ -205,4 +196,28 @@ void BCLog::Logger::ShrinkDebugFile() {
         }
     } else if (file != nullptr)
         fclose(file);
+}
+
+void BCLog::Logger::EnableCategory(LogFlags category) {
+    logCategories |= category;
+}
+
+void BCLog::Logger::DisableCategory(LogFlags category) {
+    logCategories &= ~category;
+}
+
+bool BCLog::Logger::WillLogCategory(LogFlags category) const {
+    // ALL is not meant to be used as a logging category, but only as a mask
+    // representing all categories.
+    if (category == BCLog::NONE || category == BCLog::ALL) {
+        LogPrintf("Error trying to log using a category mask instead of an "
+                  "explicit category.\n");
+        return true;
+    }
+
+    return (logCategories.load(std::memory_order_relaxed) & category) != 0;
+}
+
+bool BCLog::Logger::DefaultShrinkDebugFile() const {
+    return logCategories != BCLog::NONE;
 }

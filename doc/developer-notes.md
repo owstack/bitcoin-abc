@@ -180,29 +180,22 @@ on all categories (and give you a very large debug.log file).
 The Qt code routes qDebug() output to debug.log under category "qt": run with -debug=qt
 to see it.
 
-**running and debugging tests**
+**writing tests**
 
-Unit tests are run via `make check`
-For running functional tests, see `/test/README.md`
+For details on unit tests, see `unit-tests.md`
 
-Simple example of debugging unit tests with GDB on Linux:
-```
-cd /build/src/test
-gdb test_bitcoin
-break interpreter.cpp:295  # No path is necessary, just the file name and line number
-run
-# GDB hits the breakpoint
-p/x opcode  # print the value of the variable (in this case, opcode) in hex
-c           # continue
-```
+For details on functional tests, see `functional-tests.md`
 
-Simple example of debugging unit tests with LLDB (OSX or Linux):
-```
-cd /build/src/test
-lldb -- test_bitcoin
-break set --file interpreter.cpp --line 295
-run
-```
+**writing script integration tests**
+
+Script integration tests are built using `src/test/script_tests.cpp`:
+
+1. Uncomment the line with `#define UPDATE_JSON_TESTS`
+2. Add a new TestBuilder to the `script_build` test to cover your test case.
+3. `make && ./src/test/test_bitcoin --run_test=script_tests`
+4. Copy your newly generated test JSON from `<build-dir>/src/script_tests.json.gen` to `src/test/data/script_tests.json`.
+
+Please commit your TestBuilder along with your generated test JSON and cleanup the uncommented #define before code review.
 
 **testnet and regtest modes**
 

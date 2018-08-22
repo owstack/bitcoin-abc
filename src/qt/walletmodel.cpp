@@ -12,6 +12,7 @@
 #include "recentrequeststablemodel.h"
 #include "transactiontablemodel.h"
 
+#include "config.h"
 #include "dstencode.h"
 #include "keystore.h"
 #include "net.h" // for g_connman
@@ -160,8 +161,9 @@ void WalletModel::updateTransaction() {
 void WalletModel::updateAddressBook(const QString &address,
                                     const QString &label, bool isMine,
                                     const QString &purpose, int status) {
-    if (addressTableModel)
+    if (addressTableModel) {
         addressTableModel->updateEntry(address, label, isMine, purpose, status);
+    }
 }
 
 void WalletModel::updateWatchOnlyFlag(bool fHaveWatchonly) {
@@ -170,7 +172,8 @@ void WalletModel::updateWatchOnlyFlag(bool fHaveWatchonly) {
 }
 
 bool WalletModel::validateAddress(const QString &address) {
-    return IsValidDestinationString(address.toStdString());
+    return IsValidDestinationString(address.toStdString(),
+                                    GetConfig().GetChainParams());
 }
 
 WalletModel::SendCoinsReturn
@@ -545,18 +548,24 @@ void WalletModel::getOutputs(const std::vector<COutPoint> &vOutpoints,
                              std::vector<COutput> &vOutputs) {
     LOCK2(cs_main, wallet->cs_wallet);
     for (const COutPoint &outpoint : vOutpoints) {
-        if (!wallet->mapWallet.count(outpoint.hash)) continue;
-        int nDepth = wallet->mapWallet[outpoint.hash].GetDepthInMainChain();
-        if (nDepth < 0) continue;
-        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth,
-                    true /* spendable */, true /* solvable */, true /* safe */);
+        if (!wallet->mapWallet.count(outpoint.GetTxId())) {
+            continue;
+        }
+        int nDepth =
+            wallet->mapWallet[outpoint.GetTxId()].GetDepthInMainChain();
+        if (nDepth < 0) {
+            continue;
+        }
+        COutput out(&wallet->mapWallet[outpoint.GetTxId()], outpoint.GetN(),
+                    nDepth, true /* spendable */, true /* solvable */,
+                    true /* safe */);
         vOutputs.push_back(out);
     }
 }
 
 bool WalletModel::isSpent(const COutPoint &outpoint) const {
     LOCK2(cs_main, wallet->cs_wallet);
-    return wallet->IsSpent(outpoint.hash, outpoint.n);
+    return wallet->IsSpent(outpoint.GetTxId(), outpoint.GetN());
 }
 
 // AvailableCoins + LockedCoins grouped by wallet address (put change in one
@@ -573,13 +582,20 @@ void WalletModel::listCoins(
 
     // add locked coins
     for (const COutPoint &outpoint : vLockedCoins) {
-        if (!wallet->mapWallet.count(outpoint.hash)) continue;
-        int nDepth = wallet->mapWallet[outpoint.hash].GetDepthInMainChain();
-        if (nDepth < 0) continue;
-        COutput out(&wallet->mapWallet[outpoint.hash], outpoint.n, nDepth,
-                    true /* spendable */, true /* solvable */, true /* safe */);
-        if (outpoint.n < out.tx->tx->vout.size() &&
-            wallet->IsMine(out.tx->tx->vout[outpoint.n]) == ISMINE_SPENDABLE) {
+        if (!wallet->mapWallet.count(outpoint.GetTxId())) {
+            continue;
+        }
+        int nDepth =
+            wallet->mapWallet[outpoint.GetTxId()].GetDepthInMainChain();
+        if (nDepth < 0) {
+            continue;
+        }
+        COutput out(&wallet->mapWallet[outpoint.GetTxId()], outpoint.GetN(),
+                    nDepth, true /* spendable */, true /* solvable */,
+                    true /* safe */);
+        if (outpoint.GetN() < out.tx->tx->vout.size() &&
+            wallet->IsMine(out.tx->tx->vout[outpoint.GetN()]) ==
+                ISMINE_SPENDABLE) {
             vCoins.push_back(out);
         }
     }
@@ -590,19 +606,22 @@ void WalletModel::listCoins(
         while (wallet->IsChange(cout.tx->tx->vout[cout.i]) &&
                cout.tx->tx->vin.size() > 0 &&
                wallet->IsMine(cout.tx->tx->vin[0])) {
-            if (!wallet->mapWallet.count(cout.tx->tx->vin[0].prevout.hash))
+            if (!wallet->mapWallet.count(
+                    cout.tx->tx->vin[0].prevout.GetTxId())) {
                 break;
-            cout = COutput(&wallet->mapWallet[cout.tx->tx->vin[0].prevout.hash],
-                           cout.tx->tx->vin[0].prevout.n, 0 /* depth */,
-                           true /* spendable */, true /* solvable */,
-                           true /* safe */);
+            }
+            cout = COutput(
+                &wallet->mapWallet[cout.tx->tx->vin[0].prevout.GetTxId()],
+                cout.tx->tx->vin[0].prevout.GetN(), 0 /* depth */,
+                true /* spendable */, true /* solvable */, true /* safe */);
         }
 
         CTxDestination address;
         if (!out.fSpendable ||
             !ExtractDestination(cout.tx->tx->vout[cout.i].scriptPubKey,
-                                address))
+                                address)) {
             continue;
+        }
         mapCoins[QString::fromStdString(EncodeDestination(address))].push_back(
             out);
     }

@@ -3,33 +3,25 @@
 project(bitcoin-test)
 
 # Process json files.
-find_program(HEXDUMP "hexdump")
-find_program(SED "sed")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/data")
+
+find_program(PYTHON python)
 function(gen_json_header NAME)
 	set(HEADERS "")
 	foreach(f ${ARGN})
-		set(hex "${CMAKE_CURRENT_BINARY_DIR}/${f}.hex")
 		set(h "${CMAKE_CURRENT_BINARY_DIR}/${f}.h")
-		add_custom_command(OUTPUT ${hex}
-			COMMAND ${HEXDUMP}
-			ARGS
-				-v
-				-e "8/1 \"0x%02x, \""
-				-e "\"\\n\""
-				"${CMAKE_CURRENT_SOURCE_DIR}/${f}" > ${hex}
-			MAIN_DEPENDENCY ${f}
-			VERBATIM
-		)
+
 		# Get the proper name for the test variable.
 		get_filename_component(TEST_NAME ${f} NAME_WE)
 		add_custom_command(OUTPUT ${h}
-			COMMAND ${SED}
+			COMMAND ${PYTHON}
 			ARGS
-				-e "s/0x  ,//g"
-				-e "1 s/^/namespace json_tests{\\nstatic unsigned const char ${TEST_NAME}[] = {\\n/"
-				-e "\${s:\$:\\n\\};\\n\\}; // namespace json_tests:}"
-				< ${hex} > ${h}
-			MAIN_DEPENDENCY ${hex}
+				"${CMAKE_CURRENT_SOURCE_DIR}/data/generate_header.py"
+				"${TEST_NAME}"
+				"${CMAKE_CURRENT_SOURCE_DIR}/${f}" > ${h}
+			MAIN_DEPENDENCY ${f}
+			DEPENDS
+				"data/generate_header.py"
 			VERBATIM
 		)
 		list(APPEND HEADERS ${h})
@@ -62,10 +54,13 @@ add_test_to_suite(bitcoin test_bitcoin
 	bip32_tests.cpp
 	blockcheck_tests.cpp
 	blockencodings_tests.cpp
+	blockindex_tests.cpp
+	blockstatus_tests.cpp
 	bloom_tests.cpp
 	bswap_tests.cpp
 	cashaddr_tests.cpp
 	cashaddrenc_tests.cpp
+	checkdatasig_tests.cpp
 	checkpoints_tests.cpp
 	coins_tests.cpp
 	compress_tests.cpp
@@ -101,14 +96,15 @@ add_test_to_suite(bitcoin test_bitcoin
 	rpc_tests.cpp
 	sanity_tests.cpp
 	scheduler_tests.cpp
-	script_antireplay_tests.cpp
+	script_commitment_tests.cpp
 	script_P2SH_tests.cpp
 	script_tests.cpp
-	script_sighashtype_tests.cpp
 	scriptflags.cpp
 	scriptnum_tests.cpp
 	serialize_tests.cpp
+	sigencoding_tests.cpp
 	sighash_tests.cpp
+	sighashtype_tests.cpp
 	sigopcount_tests.cpp
 	sigutil.cpp
 	skiplist_tests.cpp
@@ -125,6 +121,7 @@ add_test_to_suite(bitcoin test_bitcoin
 	univalue_tests.cpp
 	util_tests.cpp
 	validation_tests.cpp
+	work_comparator_tests.cpp
 
 	# Tests generated from JSON
 	${JSON_HEADERS}
@@ -134,6 +131,8 @@ target_include_directories(test_bitcoin
 	PUBLIC
 		# To access the generated json headers.
 		${CMAKE_CURRENT_BINARY_DIR}
+	PRIVATE
+		${OPENSSL_INCLUDE_DIR}
 )
 
 find_package(Boost 1.58 REQUIRED unit_test_framework)

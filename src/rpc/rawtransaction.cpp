@@ -181,8 +181,8 @@ void TxToJSON(const Config &config, const CTransaction &tx,
             in.push_back(Pair("coinbase", HexStr(txin.scriptSig.begin(),
                                                  txin.scriptSig.end())));
         } else {
-            in.push_back(Pair("txid", txin.prevout.hash.GetHex()));
-            in.push_back(Pair("vout", (int64_t)txin.prevout.n));
+            in.push_back(Pair("txid", txin.prevout.GetTxId().GetHex()));
+            in.push_back(Pair("vout", int64_t(txin.prevout.GetN())));
             UniValue o(UniValue::VOBJ);
             o.push_back(Pair("asm", ScriptToAsmStr(txin.scriptSig, true)));
             o.push_back(Pair(
@@ -315,7 +315,10 @@ static UniValue getrawtransaction(const Config &config,
             HelpExampleRpc("getrawtransaction", "\"mytxid\", true"));
     }
 
-    uint256 hash = ParseHashV(request.params[0], "parameter 1");
+    // uint256 hash = ParseHashV(request.params[0], "parameter 1");
+
+    LOCK(cs_main);
+    TxId txid = TxId(ParseHashV(request.params[0], "parameter 1"));
 
     // Accept either a bool (true) or a num (>=1) to indicate verbose output.
     bool fVerbose = false;
@@ -338,29 +341,36 @@ static UniValue getrawtransaction(const Config &config,
     CTransactionRef tx;
 
     uint256 hashBlock;
+
     int nHeight = 0;
     int nConfirmations = 0;
     int nBlockTime = 0;
 
-    {
-        LOCK(cs_main);
-        if (!GetTransaction(config, hash, tx, hashBlock, true))
-            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "No information available about transaction");
+    
+    // LOCK(cs_main); // TODO: is this necessary because lock in 320
+    if (!GetTransaction(config, txid, tx, hashBlock, true)) {
+        throw JSONRPCError(
+        RPC_INVALID_ADDRESS_OR_KEY,
+        std::string(fTxIndex ? "No such mempool or blockchain transaction"
+                                : "No such mempool transaction. Use -txindex "
+                                "to enable blockchain transaction queries") +
+            ". Use gettransaction for wallet transactions.");
+    }
 
-        BlockMap::iterator mi = mapBlockIndex.find(hashBlock);
-        if (mi != mapBlockIndex.end() && (*mi).second) {
-            CBlockIndex* pindex = (*mi).second;
-            if (chainActive.Contains(pindex)) {
-                nHeight = pindex->nHeight;
-                nConfirmations = 1 + chainActive.Height() - pindex->nHeight;
-                nBlockTime = pindex->GetBlockTime();
-            } else {
-                nHeight = -1;
-                nConfirmations = 0;
-                nBlockTime = pindex->GetBlockTime();
-            }
+    BlockMap::iterator mi = mapBlockIndex.find(hashBlock);
+    if (mi != mapBlockIndex.end() && (*mi).second) {
+        CBlockIndex* pindex = (*mi).second;
+        if (chainActive.Contains(pindex)) {
+            nHeight = pindex->nHeight;
+            nConfirmations = 1 + chainActive.Height() - pindex->nHeight;
+            nBlockTime = pindex->GetBlockTime();
+        } else {
+            nHeight = -1;
+            nConfirmations = 0;
+            nBlockTime = pindex->GetBlockTime();
         }
     }
+    
 
     std::string strHex = EncodeHexTx(*tx, RPCSerializationFlags());
 
@@ -403,26 +413,26 @@ static UniValue gettxoutproof(const Config &config,
             "hex-encoded data for the proof.\n");
     }
 
-    std::set<uint256> setTxids;
-    uint256 oneTxid;
+    std::set<TxId> setTxIds;
+    TxId oneTxId;
     UniValue txids = request.params[0].get_array();
     for (unsigned int idx = 0; idx < txids.size(); idx++) {
-        const UniValue &txid = txids[idx];
-        if (txid.get_str().length() != 64 || !IsHex(txid.get_str())) {
+        const UniValue &utxid = txids[idx];
+        if (utxid.get_str().length() != 64 || !IsHex(utxid.get_str())) {
             throw JSONRPCError(RPC_INVALID_PARAMETER,
-                               std::string("Invalid txid ") + txid.get_str());
+                               std::string("Invalid txid ") + utxid.get_str());
         }
 
-        uint256 hash(uint256S(txid.get_str()));
-        if (setTxids.count(hash)) {
+        TxId txid(uint256S(utxid.get_str()));
+        if (setTxIds.count(txid)) {
             throw JSONRPCError(
                 RPC_INVALID_PARAMETER,
                 std::string("Invalid parameter, duplicated txid: ") +
-                    txid.get_str());
+                    utxid.get_str());
         }
 
-        setTxids.insert(hash);
-        oneTxid = hash;
+        setTxIds.insert(txid);
+        oneTxId = txid;
     }
 
     LOCK(cs_main);
@@ -438,8 +448,8 @@ static UniValue gettxoutproof(const Config &config,
     } else {
         // Loop through txids and try to find which block they're in. Exit loop
         // once a block is found.
-        for (const auto &tx : setTxids) {
-            const Coin &coin = AccessByTxid(*pcoinsTip, tx);
+        for (const auto &txid : setTxIds) {
+            const Coin &coin = AccessByTxid(*pcoinsTip, txid);
             if (!coin.IsSpent()) {
                 pblockindex = chainActive[coin.GetHeight()];
                 break;
@@ -449,7 +459,7 @@ static UniValue gettxoutproof(const Config &config,
 
     if (pblockindex == nullptr) {
         CTransactionRef tx;
-        if (!GetTransaction(config, oneTxid, tx, hashBlock, false) ||
+        if (!GetTransaction(config, oneTxId, tx, hashBlock, false) ||
             hashBlock.IsNull()) {
             throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY,
                                "Transaction not yet in block");
@@ -469,19 +479,19 @@ static UniValue gettxoutproof(const Config &config,
 
     unsigned int ntxFound = 0;
     for (const auto &tx : block.vtx) {
-        if (setTxids.count(tx->GetId())) {
+        if (setTxIds.count(tx->GetId())) {
             ntxFound++;
         }
     }
 
-    if (ntxFound != setTxids.size()) {
+    if (ntxFound != setTxIds.size()) {
         throw JSONRPCError(
             RPC_INVALID_ADDRESS_OR_KEY,
             "Not all transactions found in specified or retrieved block");
     }
 
     CDataStream ssMB(SER_NETWORK, PROTOCOL_VERSION);
-    CMerkleBlock mb(block, setTxids);
+    CMerkleBlock mb(block, setTxIds);
     ssMB << mb;
     std::string strHex = HexStr(ssMB.begin(), ssMB.end());
     return strHex;
@@ -623,9 +633,14 @@ static UniValue createrawtransaction(const Config &config,
         uint256 txid = ParseHashO(o, "txid");
 
         const UniValue &vout_v = find_value(o, "vout");
-        if (!vout_v.isNum()) {
+        if (vout_v.isNull()) {
             throw JSONRPCError(RPC_INVALID_PARAMETER,
                                "Invalid parameter, missing vout key");
+        }
+
+        if (!vout_v.isNum()) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER,
+                               "Invalid parameter, vout must be a number");
         }
 
         int nOutput = vout_v.get_int();
@@ -825,11 +840,11 @@ static UniValue decodescript(const Config &config,
 static void TxInErrorToJSON(const CTxIn &txin, UniValue &vErrorsRet,
                             const std::string &strMessage) {
     UniValue entry(UniValue::VOBJ);
-    entry.push_back(Pair("txid", txin.prevout.hash.ToString()));
-    entry.push_back(Pair("vout", (uint64_t)txin.prevout.n));
+    entry.push_back(Pair("txid", txin.prevout.GetTxId().ToString()));
+    entry.push_back(Pair("vout", uint64_t(txin.prevout.GetN())));
     entry.push_back(Pair("scriptSig",
                          HexStr(txin.scriptSig.begin(), txin.scriptSig.end())));
-    entry.push_back(Pair("sequence", (uint64_t)txin.nSequence));
+    entry.push_back(Pair("sequence", uint64_t(txin.nSequence)));
     entry.push_back(Pair("error", strMessage));
     vErrorsRet.push_back(entry);
 }
@@ -1291,7 +1306,7 @@ static UniValue sendrawtransaction(const Config &config,
 }
 
 // clang-format off
-static const CRPCCommand commands[] = {
+static const ContextFreeRPCCommand commands[] = {
     //  category            name                      actor (function)        okSafeMode
     //  ------------------- ------------------------  ----------------------  ----------
     { "rawtransactions",    "getrawtransaction",      getrawtransaction,      true,  {"txid","verbose"} },

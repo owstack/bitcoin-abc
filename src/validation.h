@@ -222,11 +222,6 @@ extern bool fCheckpointsEnabled;
 extern size_t nCoinCacheUsage;
 
 /**
- * A fee rate smaller than this is considered zero fee (for relaying, mining and
- * transaction creation)
- */
-extern CFeeRate minRelayTxFee;
-/**
  * Absolute maximum transaction fee (in satoshis) used by wallet and mempool
  * (rejects high fee in sendrawtransaction)
  */
@@ -313,12 +308,13 @@ public:
  *
  * Call without cs_main held.
  *
+ * @param[in]   config  The global config.
  * @param[in]   pblock  The block we want to process.
  * @param[in]   fForceProcessing Process this block even if unrequested; used
  * for non-network block sources and whitelisted peers.
  * @param[out]  fNewBlock A boolean which is set to indicate if the block was
- * first received via this call
- * @return true if the block is accepted as a valid block
+ *                        first received via this call.
+ * @return True if the block is accepted as a valid block.
  */
 bool ProcessNewBlock(const Config &config,
                      const std::shared_ptr<const CBlock> pblock,
@@ -329,41 +325,73 @@ bool ProcessNewBlock(const Config &config,
  *
  * Call without cs_main held.
  *
- * @param[in]  block The block headers themselves
- * @param[out] state This may be set to an Error state if any error occurred
- * processing them
- * @param[in]  chainparams The params for the chain we want to connect to
+ * @param[in]  config  The global config.
+ * @param[in]  block   The block headers themselves.
+ * @param[out] state   This may be set to an Error state if any error occurred
+ *                     processing them.
  * @param[out] ppindex If set, the pointer will be set to point to the last new
- * block index object for the given headers
+ *                     block index object for the given headers.
+ * @return True if block headers were accepted as valid.
  */
 bool ProcessNewBlockHeaders(const Config &config,
                             const std::vector<CBlockHeader> &block,
                             CValidationState &state,
                             const CBlockIndex **ppindex = nullptr);
 
-/** Check whether enough disk space is available for an incoming block */
+/**
+ * Check whether enough disk space is available for an incoming block.
+ */
 bool CheckDiskSpace(uint64_t nAdditionalBytes = 0);
-/** Open a block file (blk?????.dat) */
+
+/**
+ * Open a block file (blk?????.dat).
+ */
 FILE *OpenBlockFile(const CDiskBlockPos &pos, bool fReadOnly = false);
-/** Translation to a filesystem path */
+
+/**
+ * Translation to a filesystem path.
+ */
 fs::path GetBlockPosFilename(const CDiskBlockPos &pos, const char *prefix);
-/** Import blocks from an external file */
+
+/**
+ * Import blocks from an external file.
+ */
 bool LoadExternalBlockFile(const Config &config, FILE *fileIn,
                            CDiskBlockPos *dbp = nullptr);
-/** Initialize a new block tree database + block data on disk */
+
+/**
+ * Initialize a new block tree database + block data on disk.
+ */
 bool InitBlockIndex(const Config &config);
-/** Load the block tree and coins database from disk */
-bool LoadBlockIndex(const CChainParams &chainparams);
-/** Update the chain tip based on database information. */
+
+/**
+ * Load the block tree and coins database from disk.
+ */
+bool LoadBlockIndex(const Config &config);
+
+/**
+ * Update the chain tip based on database information.
+ */
 void LoadChainTip(const CChainParams &chainparams);
-/** Unload database information */
+
+/**
+ * Unload database information.
+ */
 void UnloadBlockIndex();
-/** Run an instance of the script checking thread */
+
+/**
+ * Run an instance of the script checking thread.
+ */
 void ThreadScriptCheck();
-/** Check whether we are doing an initial block download (synchronizing from
- * disk or network) */
+
+/**
+ * Check whether we are doing an initial block download (synchronizing from disk
+ * or network)
+ */
 bool IsInitialBlockDownload();
-/** Format a string that describes several potential problems detected by the
+
+/**
+ * Format a string that describes several potential problems detected by the
  * core.
  * strFor can have three values:
  * - "rpc": get critical warnings, which should put the client in safe mode if
@@ -374,10 +402,13 @@ bool IsInitialBlockDownload();
  * by strFor.
  */
 std::string GetWarnings(const std::string &strFor);
-/** Retrieve a transaction (from memory pool, or from disk, if possible) */
-bool GetTransaction(const Config &config, const uint256 &hash,
-                    CTransactionRef &tx, uint256 &hashBlock,
-                    bool fAllowSlow = false);
+
+/**
+ * Retrieve a transaction (from memory pool, or from disk, if possible).
+ */
+bool GetTransaction(const Config &config, const TxId &txid, CTransactionRef &tx,
+                    uint256 &hashBlock, bool fAllowSlow = false);
+
 /**
  * Find the best known block, and make it the active tip of the block chain.
  * If it fails, the tip is not updated.
@@ -392,17 +423,19 @@ bool ActivateBestChain(
     std::shared_ptr<const CBlock> pblock = std::shared_ptr<const CBlock>());
 Amount GetBlockSubsidy(int nHeight, const Consensus::Params &consensusParams);
 
-/** Guess verification progress (as a fraction between 0.0=genesis and
- * 1.0=current tip). */
+/**
+ * Guess verification progress (as a fraction between 0.0=genesis and
+ * 1.0=current tip).
+ */
 double GuessVerificationProgress(const ChainTxData &data, CBlockIndex *pindex);
 
 /**
- *  Mark one block file as pruned.
+ * Mark one block file as pruned.
  */
 void PruneOneBlockFile(const int fileNumber);
 
 /**
- *  Actually unlink the specified files
+ * Actually unlink the specified files
  */
 void UnlinkPrunedFiles(const std::set<int> &setFilesToPrune);
 
@@ -421,8 +454,9 @@ bool IsUAHFenabled(const Config &config, const CBlockIndex *pindexPrev);
 /** Check if DAA HF has activated. */
 bool IsDAAEnabled(const Config &config, const CBlockIndex *pindexPrev);
 
-/** Check if May 15, 2018 HF has activated. */
-bool IsMonolithEnabled(const Config &config, const CBlockIndex *pindexPrev);
+/** Check if Nov 15, 2018 HF has activated. */
+bool IsMagneticAnomalyEnabled(const Config &config,
+                              const CBlockIndex *pindexPrev);
 
 /**
  * (try to) add transaction to memory pool
@@ -436,21 +470,12 @@ bool AcceptToMemoryPool(const Config &config, CTxMemPool &pool,
 /** Convert CValidationState to a human-readable message for logging */
 std::string FormatStateMessage(const CValidationState &state);
 
-/** Get the BIP9 state for a given deployment at the current tip. */
-ThresholdState VersionBitsTipState(const Consensus::Params &params,
-                                   Consensus::DeploymentPos pos);
-
-/** Get the block height at which the BIP9 deployment switched into the state
- * for the block building on the current tip. */
-int VersionBitsTipStateSinceHeight(const Consensus::Params &params,
-                                   Consensus::DeploymentPos pos);
-
 /**
  * Count ECDSA signature operations the old-fashioned (pre-0.6) way
  * @return number of sigops this transaction's outputs will produce when spent
  * @see CTransaction::FetchInputs
  */
-uint64_t GetSigOpCountWithoutP2SH(const CTransaction &tx);
+uint64_t GetSigOpCountWithoutP2SH(const CTransaction &tx, uint32_t flags);
 
 /**
  * Count ECDSA signature operations in pay-to-script-hash inputs.
@@ -462,18 +487,19 @@ uint64_t GetSigOpCountWithoutP2SH(const CTransaction &tx);
  * @see CTransaction::FetchInputs
  */
 uint64_t GetP2SHSigOpCount(const CTransaction &tx,
-                           const CCoinsViewCache &mapInputs);
+                           const CCoinsViewCache &mapInputs, uint32_t flags);
 
 /**
  * Compute total signature operation of a transaction.
  * @param[in] tx     Transaction for which we are computing the cost
  * @param[in] inputs Map of previous transactions that have outputs we're
  * spending
- * @param[out] flags Script verification flags
+ * @param[in] flags  Script verification flags
  * @return Total signature operation cost of tx
  */
 uint64_t GetTransactionSigOpCount(const CTransaction &tx,
-                                  const CCoinsViewCache &inputs, int flags);
+                                  const CCoinsViewCache &inputs,
+                                  uint32_t flags);
 
 /**
  * Check whether all inputs of this transaction are valid (no double spends,
@@ -494,15 +520,25 @@ bool CheckInputs(const CTransaction &tx, CValidationState &state,
                  const PrecomputedTransactionData &txdata,
                  std::vector<CScriptCheck> *pvChecks = nullptr);
 
-/** Apply the effects of this transaction on the UTXO set represented by view */
-void UpdateCoins(const CTransaction &tx, CCoinsViewCache &inputs, int nHeight);
-void UpdateCoins(const CTransaction &tx, CCoinsViewCache &inputs,
-                 CTxUndo &txundo, int nHeight);
+/**
+ * Mark all the coins corresponding to a given transaction inputs as spent.
+ */
+void SpendCoins(CCoinsViewCache &view, const CTransaction &tx, CTxUndo &txundo,
+                int nHeight);
+
+/**
+ * Apply the effects of this transaction on the UTXO set represented by view.
+ */
+void UpdateCoins(CCoinsViewCache &view, const CTransaction &tx, int nHeight);
+void UpdateCoins(CCoinsViewCache &view, const CTransaction &tx, CTxUndo &txundo,
+                 int nHeight);
 
 /** Transaction validation functions */
 
-/** Context-independent validity checks for coinbase and non-coinbase
- * transactions */
+/**
+ * Context-independent validity checks for coinbase and non-coinbase
+ * transactions.
+ */
 bool CheckRegularTransaction(const CTransaction &tx, CValidationState &state,
                              bool fCheckDuplicateInputs = true);
 bool CheckCoinbase(const CTransaction &tx, CValidationState &state,
@@ -628,7 +664,8 @@ bool CheckBlock(
  */
 bool ContextualCheckTransaction(const Config &config, const CTransaction &tx,
                                 CValidationState &state, int nHeight,
-                                int64_t nLockTimeCutoff);
+                                int64_t nLockTimeCutoff,
+                                int64_t nMedianTimePast);
 
 /**
  * This is a variant of ContextualCheckTransaction which computes the contextual

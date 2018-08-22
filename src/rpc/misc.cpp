@@ -127,8 +127,8 @@ static UniValue getinfo(const Config &config, const JSONRPCRequest &request) {
     }
     obj.push_back(Pair("paytxfee", ValueFromAmount(payTxFee.GetFeePerK())));
 #endif
-    obj.push_back(
-        Pair("relayfee", ValueFromAmount(::minRelayTxFee.GetFeePerK())));
+    obj.push_back(Pair("relayfee",
+                       ValueFromAmount(config.GetMinFeePerKB().GetFeePerK())));
     obj.push_back(Pair("errors", GetWarnings("statusbar")));
     return obj;
 }
@@ -1167,7 +1167,7 @@ UniValue getspentinfo(const Config &config, const JSONRPCRequest& request)
 }
 
 // clang-format off
-static const CRPCCommand commands[] = {
+static const ContextFreeRPCCommand commands[] = {
     //  category            name                      actor (function)        okSafeMode
     //  ------------------- ------------------------  ----------------------  ----------
     { "control",            "getinfo",                getinfo,                true,  {} }, /* uses wallet if enabled */

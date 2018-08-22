@@ -94,6 +94,7 @@ BITCOIN_CORE_H = \
   base58.h \
   bloom.h \
   blockencodings.h \
+  blockindexworkcomparator.h \
   cashaddr.h \
   cashaddrenc.h \
   chain.h \
@@ -143,6 +144,7 @@ BITCOIN_CORE_H = \
   reverselock.h \
   rpc/blockchain.h \
   rpc/client.h \
+  rpc/jsonrpcrequest.h \
   rpc/mining.h \
   rpc/misc.h \
   rpc/protocol.h \
@@ -224,6 +226,7 @@ libbitcoin_server_a_SOURCES = \
   rest.cpp \
   rpc/abc.cpp \
   rpc/blockchain.cpp \
+  rpc/jsonrpcrequest.cpp \
   rpc/mining.cpp \
   rpc/misc.cpp \
   rpc/net.cpp \
@@ -320,6 +323,9 @@ libbitcoin_consensus_a_SOURCES = \
   script/script.h \
   script/script_error.cpp \
   script/script_error.h \
+  script/script_flags.h \
+  script/sigencoding.cpp \
+  script/sigencoding.h \
   serialize.h \
   tinyformat.h \
   uint256.cpp \

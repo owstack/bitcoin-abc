@@ -1,8 +1,8 @@
 dnl require autoconf 2.60 (AS_ECHO/AS_ECHO_N)
 AC_PREREQ([2.60])
 define(_CLIENT_VERSION_MAJOR, 0)
-define(_CLIENT_VERSION_MINOR, 17)
-define(_CLIENT_VERSION_REVISION, 1)
+define(_CLIENT_VERSION_MINOR, 18)
+define(_CLIENT_VERSION_REVISION, 0)
 define(_CLIENT_VERSION_BUILD, 0)
 define(_CLIENT_VERSION_IS_RELEASE, true)
 define(_COPYRIGHT_YEAR, 2018)
@@ -250,6 +250,8 @@ if test "x$enable_asan" = xyes; then
   if test "x$asan_failed" = xyes; then
     AC_MSG_ERROR("ASAN is not supported")
   fi
+  # fix linkage in MacOs
+  [LIBTOOL_APP_LDFLAGS="$LIBTOOL_APP_LDFLAGS -fsanitize=address"],
 fi
 
 if test "x$enable_tsan" = xyes; then
@@ -751,7 +753,7 @@ AC_SUBST(LIBMEMENV)
 
 if test x$enable_wallet != xno; then
     dnl Check for libdb_cxx only if wallet enabled
-    BITCOIN_FIND_BDB48
+    BITCOIN_FIND_BDB53
 fi
 
 dnl Check for libminiupnpc (optional)

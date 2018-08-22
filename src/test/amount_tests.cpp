@@ -84,7 +84,7 @@ static void CheckAmounts(int64_t aval, int64_t bval) {
 }
 
 BOOST_AUTO_TEST_CASE(AmountTests) {
-    std::array<int64_t, 8> values = {-23, -1, 0, 1, 2, 3, 42, 99999999};
+    std::array<int64_t, 8> values = {{-23, -1, 0, 1, 2, 3, 42, 99999999}};
 
     for (int64_t i : values) {
         for (int64_t j : values) {
@@ -92,8 +92,8 @@ BOOST_AUTO_TEST_CASE(AmountTests) {
         }
     }
 
-    BOOST_CHECK_EQUAL(COIN + COIN, Amount(2 * COIN));
-    BOOST_CHECK_EQUAL(2 * COIN + COIN, Amount(3 * COIN));
+    BOOST_CHECK_EQUAL(COIN + COIN, 2 * COIN);
+    BOOST_CHECK_EQUAL(2 * COIN + COIN, 3 * COIN);
     BOOST_CHECK_EQUAL(-1 * COIN + COIN, Amount(0));
 
     BOOST_CHECK_EQUAL(COIN - COIN, Amount(0));

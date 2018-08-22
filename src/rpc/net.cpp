@@ -527,10 +527,6 @@ static UniValue getnetworkinfo(const Config &config,
             "  \"excessutxocharge\": x.xxxxxxxx,        (numeric) minimum "
             "charge for excess utxos in " +
             CURRENCY_UNIT + "\n"
-                            "  \"incrementalfee\": x.xxxxxxxx,          "
-                            "(numeric) minimum fee increment for mempool "
-                            "limiting or BIP 125 replacement in " +
-            CURRENCY_UNIT + "/kB\n"
                             "  \"localaddresses\": [                    "
                             "(array) list of local addresses\n"
                             "  {\n"
@@ -567,12 +563,10 @@ static UniValue getnetworkinfo(const Config &config,
                  (int)g_connman->GetNodeCount(CConnman::CONNECTIONS_ALL)));
     }
     obj.push_back(Pair("networks", GetNetworksInfo()));
-    obj.push_back(
-        Pair("relayfee", ValueFromAmount(::minRelayTxFee.GetFeePerK())));
+    obj.push_back(Pair("relayfee",
+                       ValueFromAmount(config.GetMinFeePerKB().GetFeePerK())));
     obj.push_back(Pair("excessutxocharge",
                        ValueFromAmount(config.GetExcessUTXOCharge())));
-    obj.push_back(Pair("incrementalfee",
-                       ValueFromAmount(::incrementalRelayFee.GetFeePerK())));
     UniValue localAddresses(UniValue::VARR);
     {
         LOCK(cs_mapLocalHost);
@@ -751,7 +745,7 @@ static UniValue setnetworkactive(const Config &config,
 }
 
 // clang-format off
-static const CRPCCommand commands[] = {
+static const ContextFreeRPCCommand commands[] = {
     //  category            name                      actor (function)        okSafeMode
     //  ------------------- ------------------------  ----------------------  ----------
     { "network",            "getconnectioncount",     getconnectioncount,     true,  {} },

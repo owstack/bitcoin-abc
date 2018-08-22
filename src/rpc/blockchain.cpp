@@ -522,16 +522,15 @@ void entryToJSON(UniValue &info, const CTxMemPoolEntry &e) {
     info.push_back(Pair("descendantcount", e.GetCountWithDescendants()));
     info.push_back(Pair("descendantsize", e.GetSizeWithDescendants()));
     info.push_back(
-        Pair("descendantfees", e.GetModFeesWithDescendants().GetSatoshis()));
+        Pair("descendantfees", e.GetModFeesWithDescendants() / SATOSHI));
     info.push_back(Pair("ancestorcount", e.GetCountWithAncestors()));
     info.push_back(Pair("ancestorsize", e.GetSizeWithAncestors()));
-    info.push_back(
-        Pair("ancestorfees", e.GetModFeesWithAncestors().GetSatoshis()));
+    info.push_back(Pair("ancestorfees", e.GetModFeesWithAncestors() / SATOSHI));
     const CTransaction &tx = e.GetTx();
     std::set<std::string> setDepends;
     for (const CTxIn &txin : tx.vin) {
-        if (mempool.exists(txin.prevout.hash)) {
-            setDepends.insert(txin.prevout.hash.ToString());
+        if (mempool.exists(txin.prevout.GetTxId())) {
+            setDepends.insert(txin.prevout.GetTxId().ToString());
         }
     }
 
@@ -1033,7 +1032,7 @@ UniValue getblock(const Config &config, const JSONRPCRequest &request) {
     CBlock block;
     CBlockIndex *pblockindex = mapBlockIndex[hash];
 
-    if (fHavePruned && !(pblockindex->nStatus & BLOCK_HAVE_DATA) &&
+    if (fHavePruned && !pblockindex->nStatus.hasData() &&
         pblockindex->nTx > 0) {
         throw JSONRPCError(RPC_MISC_ERROR, "Block not available (pruned data)");
     }
@@ -1082,7 +1081,7 @@ static void ApplyStats(CCoinsStats &stats, CHashWriter &ss, const uint256 &hash,
     for (const auto output : outputs) {
         ss << VARINT(output.first + 1);
         ss << output.second.GetTxOut().scriptPubKey;
-        ss << VARINT(output.second.GetTxOut().nValue.GetSatoshis());
+        ss << VARINT(output.second.GetTxOut().nValue / SATOSHI);
         stats.nTransactionOutputs++;
         stats.nTotalAmount += output.second.GetTxOut().nValue;
         stats.nBogoSize +=
@@ -1111,12 +1110,12 @@ static bool GetUTXOStats(CCoinsView *view, CCoinsStats &stats) {
         COutPoint key;
         Coin coin;
         if (pcursor->GetKey(key) && pcursor->GetValue(coin)) {
-            if (!outputs.empty() && key.hash != prevkey) {
+            if (!outputs.empty() && key.GetTxId() != prevkey) {
                 ApplyStats(stats, ss, prevkey, outputs);
                 outputs.clear();
             }
-            prevkey = key.hash;
-            outputs[key.n] = std::move(coin);
+            prevkey = key.GetTxId();
+            outputs[key.GetN()] = std::move(coin);
         } else {
             return error("%s: unable to read value", __func__);
         }
@@ -1376,6 +1375,9 @@ static UniValue SoftForkMajorityDesc(int version, CBlockIndex *pindex,
         case 4:
             activated = pindex->nHeight >= consensusParams.BIP65Height;
             break;
+        case 5:
+            activated = pindex->nHeight >= consensusParams.CSVHeight;
+            break;
     }
     rv.push_back(Pair("status", activated));
     return rv;
@@ -1390,52 +1392,6 @@ static UniValue SoftForkDesc(const std::string &name, int version,
     rv.push_back(
         Pair("reject", SoftForkMajorityDesc(version, pindex, consensusParams)));
     return rv;
-}
-
-static UniValue BIP9SoftForkDesc(const Consensus::Params &consensusParams,
-                                 Consensus::DeploymentPos id) {
-    UniValue rv(UniValue::VOBJ);
-    const ThresholdState thresholdState =
-        VersionBitsTipState(consensusParams, id);
-    switch (thresholdState) {
-        case THRESHOLD_DEFINED:
-            rv.push_back(Pair("status", "defined"));
-            break;
-        case THRESHOLD_STARTED:
-            rv.push_back(Pair("status", "started"));
-            break;
-        case THRESHOLD_LOCKED_IN:
-            rv.push_back(Pair("status", "locked_in"));
-            break;
-        case THRESHOLD_ACTIVE:
-            rv.push_back(Pair("status", "active"));
-            break;
-        case THRESHOLD_FAILED:
-            rv.push_back(Pair("status", "failed"));
-            break;
-    }
-    if (THRESHOLD_STARTED == thresholdState) {
-        rv.push_back(Pair("bit", consensusParams.vDeployments[id].bit));
-    }
-    rv.push_back(
-        Pair("startTime", consensusParams.vDeployments[id].nStartTime));
-    rv.push_back(Pair("timeout", consensusParams.vDeployments[id].nTimeout));
-    rv.push_back(
-        Pair("since", VersionBitsTipStateSinceHeight(consensusParams, id)));
-    return rv;
-}
-
-void BIP9SoftForkDescPushBack(UniValue &bip9_softforks, const std::string &name,
-                              const Consensus::Params &consensusParams,
-                              Consensus::DeploymentPos id) {
-    // Deployments with timeout value of 0 are hidden.
-    // A timeout value of 0 guarantees a softfork will never be activated.
-    // This is used when softfork codes are merged without specifying the
-    // deployment schedule.
-    if (consensusParams.vDeployments[id].nTimeout > 0) {
-        bip9_softforks.push_back(
-            Pair(name, BIP9SoftForkDesc(consensusParams, id)));
-    }
 }
 
 UniValue getblockchaininfo(const Config &config,
@@ -1477,24 +1433,7 @@ UniValue getblockchaininfo(const Config &config,
             "reached\n"
             "        },\n"
             "     }, ...\n"
-            "  ],\n"
-            "  \"bip9_softforks\": {          (object) status of BIP9 "
-            "softforks in progress\n"
-            "     \"xxxx\" : {                (string) name of the softfork\n"
-            "        \"status\": \"xxxx\",    (string) one of \"defined\", "
-            "\"started\", \"locked_in\", \"active\", \"failed\"\n"
-            "        \"bit\": xx,             (numeric) the bit (0-28) in the "
-            "block version field used to signal this softfork (only for "
-            "\"started\" status)\n"
-            "        \"startTime\": xx,       (numeric) the minimum median "
-            "time past of a block at which the bit gains its meaning\n"
-            "        \"timeout\": xx,         (numeric) the median time past "
-            "of a block at which the deployment is considered failed if not "
-            "yet locked in\n"
-            "        \"since\": xx            (numeric) height of the first "
-            "block to which the status applies\n"
-            "     }\n"
-            "  }\n"
+            "  ]\n"
             "}\n"
             "\nExamples:\n" +
             HelpExampleCli("getblockchaininfo", "") +
@@ -1524,19 +1463,15 @@ UniValue getblockchaininfo(const Config &config,
         config.GetChainParams().GetConsensus();
     CBlockIndex *tip = chainActive.Tip();
     UniValue softforks(UniValue::VARR);
-    UniValue bip9_softforks(UniValue::VOBJ);
     softforks.push_back(SoftForkDesc("bip34", 2, tip, consensusParams));
     softforks.push_back(SoftForkDesc("bip66", 3, tip, consensusParams));
     softforks.push_back(SoftForkDesc("bip65", 4, tip, consensusParams));
-    BIP9SoftForkDescPushBack(bip9_softforks, "csv", consensusParams,
-                             Consensus::DEPLOYMENT_CSV);
+    softforks.push_back(SoftForkDesc("csv", 5, tip, consensusParams));
     obj.push_back(Pair("softforks", softforks));
-    obj.push_back(Pair("bip9_softforks", bip9_softforks));
 
     if (fPruneMode) {
         CBlockIndex *block = chainActive.Tip();
-        while (block && block->pprev &&
-               (block->pprev->nStatus & BLOCK_HAVE_DATA)) {
+        while (block && block->pprev && block->pprev->nStatus.hasData()) {
             block = block->pprev;
         }
 
@@ -1646,19 +1581,19 @@ UniValue getchaintips(const Config &config, const JSONRPCRequest &request) {
         if (chainActive.Contains(block)) {
             // This block is part of the currently active chain.
             status = "active";
-        } else if (block->nStatus & BLOCK_FAILED_MASK) {
+        } else if (block->nStatus.isInvalid()) {
             // This block or one of its ancestors is invalid.
             status = "invalid";
         } else if (block->nChainTx == 0) {
             // This block cannot be connected because full block data for it or
             // one of its parents is missing.
             status = "headers-only";
-        } else if (block->IsValid(BLOCK_VALID_SCRIPTS)) {
+        } else if (block->IsValid(BlockValidity::SCRIPTS)) {
             // This block is fully validated, but no longer part of the active
             // chain. It was probably the active block once, but was
             // reorganized.
             status = "valid-fork";
-        } else if (block->IsValid(BLOCK_VALID_TREE)) {
+        } else if (block->IsValid(BlockValidity::TREE)) {
             // The headers for this block are valid, but it has not been
             // validated. It was probably never part of the most-work chain.
             status = "valid-headers";
@@ -1934,7 +1869,7 @@ UniValue getchaintxstats(const Config &config, const JSONRPCRequest &request) {
 }
 
 // clang-format off
-static const CRPCCommand commands[] = {
+static const ContextFreeRPCCommand commands[] = {
     //  category            name                      actor (function)        okSafe argNames
     //  ------------------- ------------------------  ----------------------  ------ ----------
     { "blockchain",         "getblockchaininfo",      getblockchaininfo,      true,  {} },

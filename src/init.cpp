@@ -300,7 +300,7 @@ void OnRPCStopped() {
     LogPrint(BCLog::RPC, "RPC stopped.\n");
 }
 
-void OnRPCPreCommand(const CRPCCommand &cmd) {
+void OnRPCPreCommand(const ContextFreeRPCCommand &cmd) {
     // Observe safe mode.
     std::string strWarning = GetWarnings("rpc");
     if (strWarning != "" &&
@@ -698,9 +698,6 @@ std::string HelpMessage(HelpMessageMode mode) {
                       "more than <n> kilobytes of in-mempool descendants "
                       "(default: %u).",
                       DEFAULT_DESCENDANT_SIZE_LIMIT));
-        strUsage += HelpMessageOpt("-bip9params=deployment:start:end",
-                                   "Use given start/end times for specified "
-                                   "BIP9 deployment (regtest-only)");
     }
     strUsage += HelpMessageOpt(
         "-debug=<category>",
@@ -809,12 +806,6 @@ std::string HelpMessage(HelpMessageMode mode) {
                                        "limit, in bytes (default: %d)"),
                                      DEFAULT_MAX_BLOCK_SIZE));
         strUsage += HelpMessageOpt(
-            "-incrementalrelayfee=<amt>",
-            strprintf(
-                "Fee rate (in %s/kB) used to define cost of relay, used for "
-                "mempool limiting and BIP 125 replacement. (default: %s)",
-                CURRENCY_UNIT, FormatMoney(DEFAULT_INCREMENTAL_RELAY_FEE)));
-        strUsage += HelpMessageOpt(
             "-dustrelayfee=<amt>",
             strprintf("Fee rate (in %s/kB) used to defined dust, the value of "
                       "an output such that it will cost about 1/3 of its value "
@@ -832,10 +823,9 @@ std::string HelpMessage(HelpMessageMode mode) {
                   DEFAULT_ACCEPT_DATACARRIER));
     strUsage += HelpMessageOpt(
         "-datacarriersize",
-        strprintf(
-            _("Maximum size of data in data carrier transactions we relay and "
-              "mine (pre-fork default: %u, post-fork default: %u)"),
-            MAX_OP_RETURN_RELAY, MAX_OP_RETURN_RELAY_LARGE));
+        strprintf(_("Maximum size of data in data carrier transactions we "
+                    "relay and mine (default: %u)"),
+                  MAX_OP_RETURN_RELAY));
 
     strUsage += HelpMessageGroup(_("Block creation options:"));
     strUsage += HelpMessageOpt(
@@ -1127,9 +1117,9 @@ bool InitSanityCheck(void) {
 }
 
 static bool AppInitServers(Config &config, boost::thread_group &threadGroup) {
-    RPCServer::OnStarted(&OnRPCStarted);
-    RPCServer::OnStopped(&OnRPCStopped);
-    RPCServer::OnPreCommand(&OnRPCPreCommand);
+    RPCServerSignals::OnStarted(&OnRPCStarted);
+    RPCServerSignals::OnStopped(&OnRPCStopped);
+    RPCServerSignals::OnPreCommand(&OnRPCPreCommand);
     if (!InitHTTPServer(config)) return false;
     if (!StartRPC()) return false;
     if (!StartHTTPRPC()) return false;
@@ -1391,13 +1381,13 @@ bool AppInitParameterInteraction(Config &config) {
         if (find(categories.begin(), categories.end(), std::string("0")) ==
             categories.end()) {
             for (const auto &cat : categories) {
-                uint32_t flag = 0;
-                if (!GetLogCategory(&flag, &cat)) {
+                BCLog::LogFlags flag;
+                if (!GetLogCategory(flag, cat)) {
                     InitWarning(
                         strprintf(_("Unsupported logging category %s=%s."),
                                   "-debug", cat));
                 }
-                logCategories |= flag;
+                GetLogger().EnableCategory(flag);
             }
         }
     }
@@ -1405,12 +1395,12 @@ bool AppInitParameterInteraction(Config &config) {
     // Now remove the logging categories which were explicitly excluded
     if (gArgs.IsArgSet("-debugexclude")) {
         for (const std::string &cat : gArgs.GetArgs("-debugexclude")) {
-            uint32_t flag;
-            if (!GetLogCategory(&flag, &cat)) {
+            BCLog::LogFlags flag;
+            if (!GetLogCategory(flag, cat)) {
                 InitWarning(strprintf(_("Unsupported logging category %s=%s."),
                                       "-debugexclude", cat));
             }
-            logCategories &= ~flag;
+            GetLogger().DisableCategory(flag);
         }
     }
 
@@ -1491,17 +1481,6 @@ bool AppInitParameterInteraction(Config &config) {
     if (nMempoolSizeMax < 0 || nMempoolSizeMax < nMempoolSizeMin)
         return InitError(strprintf(_("-maxmempool must be at least %d MB"),
                                    std::ceil(nMempoolSizeMin / 1000000.0)));
-    // Incremental relay fee sets the minimimum feerate increase necessary for
-    // BIP 125 replacement in the mempool and the amount the mempool min fee
-    // increases above the feerate of txs evicted due to mempool limiting.
-    if (gArgs.IsArgSet("-incrementalrelayfee")) {
-        Amount n(0);
-        if (!ParseMoney(gArgs.GetArg("-incrementalrelayfee", ""), n))
-            return InitError(
-                AmountErrMsg("incrementalrelayfee",
-                             gArgs.GetArg("-incrementalrelayfee", "")));
-        incrementalRelayFee = CFeeRate(n);
-    }
 
     // -par=0 means autodetect, but nScriptCheckThreads==0 means no concurrency
     nScriptCheckThreads = gArgs.GetArg("-par", DEFAULT_SCRIPTCHECK_THREADS);
@@ -1587,13 +1566,9 @@ bool AppInitParameterInteraction(Config &config) {
             return InitError(AmountErrMsg("minrelaytxfee",
                                           gArgs.GetArg("-minrelaytxfee", "")));
         // High fee check is done afterward in CWallet::ParameterInteraction()
-        ::minRelayTxFee = CFeeRate(n);
-    } else if (incrementalRelayFee > ::minRelayTxFee) {
-        // Allow only setting incrementalRelayFee to control both
-        ::minRelayTxFee = incrementalRelayFee;
-        LogPrintf(
-            "Increasing minrelaytxfee to %s to match incrementalrelayfee\n",
-            ::minRelayTxFee.ToString());
+        config.SetMinFeePerKB(CFeeRate(n));
+    } else {
+        config.SetMinFeePerKB(CFeeRate(DEFAULT_MIN_RELAY_TX_FEE));
     }
 
     // Sanity check argument for min fee for including tx in block
@@ -1646,50 +1621,6 @@ bool AppInitParameterInteraction(Config &config) {
     nLocalServices = ServiceFlags(nLocalServices | NODE_BITCOIN_CASH);
 
     nMaxTipAge = gArgs.GetArg("-maxtipage", DEFAULT_MAX_TIP_AGE);
-
-    if (gArgs.IsArgSet("-bip9params")) {
-        // Allow overriding BIP9 parameters for testing
-        if (!chainparams.MineBlocksOnDemand()) {
-            return InitError(
-                "BIP9 parameters may only be overridden on regtest.");
-        }
-        for (const std::string &strDeployment : gArgs.GetArgs("-bip9params")) {
-            std::vector<std::string> vDeploymentParams;
-            boost::split(vDeploymentParams, strDeployment,
-                         boost::is_any_of(":"));
-            if (vDeploymentParams.size() != 3) {
-                return InitError("BIP9 parameters malformed, expecting "
-                                 "deployment:start:end");
-            }
-            int64_t nStartTime, nTimeout;
-            if (!ParseInt64(vDeploymentParams[1], &nStartTime)) {
-                return InitError(
-                    strprintf("Invalid nStartTime (%s)", vDeploymentParams[1]));
-            }
-            if (!ParseInt64(vDeploymentParams[2], &nTimeout)) {
-                return InitError(
-                    strprintf("Invalid nTimeout (%s)", vDeploymentParams[2]));
-            }
-            bool found = false;
-            for (int j = 0; j < (int)Consensus::MAX_VERSION_BITS_DEPLOYMENTS;
-                 ++j) {
-                if (vDeploymentParams[0].compare(
-                        VersionBitsDeploymentInfo[j].name) == 0) {
-                    UpdateBIP9Parameters(Consensus::DeploymentPos(j),
-                                         nStartTime, nTimeout);
-                    found = true;
-                    LogPrintf("Setting BIP9 activation parameters for %s to "
-                              "start=%ld, timeout=%ld\n",
-                              vDeploymentParams[0], nStartTime, nTimeout);
-                    break;
-                }
-            }
-            if (!found) {
-                return InitError(
-                    strprintf("Invalid deployment (%s)", vDeploymentParams[0]));
-            }
-        }
-    }
 
     return true;
 }
@@ -1765,7 +1696,8 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
 
     BCLog::Logger &logger = GetLogger();
 
-    if (gArgs.GetBoolArg("-shrinkdebugfile", logCategories != BCLog::NONE)) {
+    bool default_shrinkdebugfile = logger.DefaultShrinkDebugFile();
+    if (gArgs.GetBoolArg("-shrinkdebugfile", default_shrinkdebugfile)) {
         // Do this first since it both loads a bunch of debug.log into memory,
         // and because this needs to happen before any other debug.log printing.
         logger.ShrinkDebugFile();
@@ -1805,10 +1737,10 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
     threadGroup.create_thread(boost::bind(&TraceThread<CScheduler::Function>,
                                           "scheduler", serviceLoop));
 
-    /* Start the RPC server already.  It will be started in "warmup" mode
-     * and not really process calls already (but it will signify connections
-     * that the server is there and will be ready later).  Warmup mode will
-     * be disabled when initialisation is finished.
+    /* Start the RPC server.  It will be started in "warmup" mode and not
+     * process calls yet (but it will verify that the server is there and
+     * will be ready later).  Warmup mode will be completed when initialisation
+     * is finished.
      */
     if (gArgs.GetBoolArg("-server", false)) {
         uiInterface.InitMessage.connect(SetRPCWarmupStatus);
@@ -1817,8 +1749,6 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
                 _("Unable to start HTTP server. See debug log for details."));
         }
     }
-
-    int64_t nStart;
 
 // Step 5: verify wallet database integrity
 #ifdef ENABLE_WALLET
@@ -2045,6 +1975,7 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
               nCoinCacheUsage * (1.0 / 1024 / 1024),
               nMempoolSizeMax * (1.0 / 1024 / 1024));
 
+    int64_t nStart = 0;
     bool fLoaded = false;
     while (!fLoaded && !fRequestShutdown) {
         bool fReset = fReindex;
@@ -2080,7 +2011,7 @@ bool AppInitMain(Config &config, boost::thread_group &threadGroup,
                 }
                 if (fRequestShutdown) break;
 
-                if (!LoadBlockIndex(chainparams)) {
+                if (!LoadBlockIndex(config)) {
                     strLoadError = _("Error loading block database");
                     break;
                 }
