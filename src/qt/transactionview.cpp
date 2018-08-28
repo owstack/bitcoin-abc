@@ -385,16 +385,18 @@ void TransactionView::contextualMenu(const QPoint &point) {
     QModelIndex index = transactionView->indexAt(point);
     QModelIndexList selection =
         transactionView->selectionModel()->selectedRows(0);
-    if (selection.empty()) return;
+    if (selection.empty()) {
+        return;
+    }
 
     // check if transaction can be abandoned, disable context menu action in
     // case it doesn't
-    uint256 hash;
-    hash.SetHex(selection.at(0)
+    TxId txid;
+    txid.SetHex(selection.at(0)
                     .data(TransactionTableModel::TxHashRole)
                     .toString()
                     .toStdString());
-    abandonAction->setEnabled(model->transactionCanBeAbandoned(hash));
+    abandonAction->setEnabled(model->transactionCanBeAbandoned(txid));
 
     if (index.isValid()) {
         contextMenu->exec(QCursor::pos());
@@ -402,18 +404,21 @@ void TransactionView::contextualMenu(const QPoint &point) {
 }
 
 void TransactionView::abandonTx() {
-    if (!transactionView || !transactionView->selectionModel()) return;
+    if (!transactionView || !transactionView->selectionModel()) {
+        return;
+    }
     QModelIndexList selection =
         transactionView->selectionModel()->selectedRows(0);
 
     // get the hash from the TxHashRole (QVariant / QString)
-    uint256 hash;
     QString hashQStr =
         selection.at(0).data(TransactionTableModel::TxHashRole).toString();
-    hash.SetHex(hashQStr.toStdString());
+
+    TxId txid;
+    txid.SetHex(hashQStr.toStdString());
 
     // Abandon the wallet transaction over the walletModel
-    model->abandonTransaction(hash);
+    model->abandonTransaction(txid);
 
     // Update the table
     model->getTransactionTableModel()->updateTransaction(hashQStr, CT_UPDATED,

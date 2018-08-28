@@ -307,6 +307,7 @@ libbitcoin_consensus_a_SOURCES = \
   consensus/merkle.h \
   consensus/params.h \
   consensus/validation.h \
+  feerate.h \
   hash.cpp \
   hash.h \
   prevector.h \
@@ -314,6 +315,7 @@ libbitcoin_consensus_a_SOURCES = \
   primitives/block.h \
   primitives/transaction.cpp \
   primitives/transaction.h \
+  primitives/txid.h \
   pubkey.cpp \
   pubkey.h \
   script/bitcoinconsensus.cpp \
@@ -348,6 +350,7 @@ libbitcoin_common_a_SOURCES = \
   coins.cpp \
   compressor.cpp \
   dstencode.cpp \
+  feerate.cpp \
   globals.cpp \
   core_read.cpp \
   core_write.cpp \

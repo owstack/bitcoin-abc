@@ -1267,7 +1267,7 @@ Amount GetBlockSubsidy(int nHeight, const Consensus::Params &consensusParams) {
     Amount nSubsidy = 50 * COIN;
     // Subsidy is cut in half every 210,000 blocks which will occur
     // approximately every 4 years.
-    return Amount(nSubsidy.GetSatoshis() >> halvings);
+    return Amount((nSubsidy / SATOSHI) >> halvings);
 }
 
 bool IsInitialBlockDownload() {
@@ -3172,6 +3172,7 @@ static bool ActivateBestChainStep(const Config &config, CValidationState &state,
         // any disconnected transactions back to the mempool.
         disconnectpool.updateMempoolForReorg(config, true);
     }
+
     mempool.check(pcoinsTip);
 
     // Callbacks/notifications for a new best chain.

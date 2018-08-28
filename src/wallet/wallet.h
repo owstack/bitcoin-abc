@@ -450,7 +450,7 @@ public:
     // RelayWalletTransaction may only be called if fBroadcastTransactions!
     bool RelayWalletTransaction(CConnman *connman);
 
-    std::set<uint256> GetConflicts() const;
+    std::set<TxId> GetConflicts() const;
 };
 
 class COutput {
@@ -622,10 +622,10 @@ private:
      * Used to keep track of spent outpoints, and detect and report conflicts
      * (double-spends or mutated transactions where the mutant gets mined).
      */
-    typedef std::multimap<COutPoint, uint256> TxSpends;
+    typedef std::multimap<COutPoint, TxId> TxSpends;
     TxSpends mapTxSpends;
-    void AddToSpends(const COutPoint &outpoint, const uint256 &wtxid);
-    void AddToSpends(const uint256 &wtxid);
+    void AddToSpends(const COutPoint &outpoint, const TxId &wtxid);
+    void AddToSpends(const TxId &wtxid);
 
     /* Mark a transaction (and its in-wallet descendants) as conflicting with a
      * particular block. */
@@ -755,7 +755,7 @@ public:
 
     std::set<COutPoint> setLockedCoins;
 
-    const CWalletTx *GetWalletTx(const uint256 &hash) const;
+    const CWalletTx *GetWalletTx(const TxId &txid) const;
 
     //! check whether we are allowed to upgrade (or already support) to the
     //! named feature
@@ -1050,7 +1050,7 @@ public:
 
     //! Get wallet transactions that conflict with given transaction (spend same
     //! outputs)
-    std::set<uint256> GetConflicts(const uint256 &txid) const;
+    std::set<TxId> GetConflicts(const TxId &txid) const;
 
     //! Check if a given transaction has any of its outputs spent by another
     //! transaction in the wallet
@@ -1101,7 +1101,7 @@ public:
      * Mark a transaction (and it in-wallet descendants) as abandoned so its
      * inputs may be respent.
      */
-    bool AbandonTransaction(const uint256 &hashTx);
+    bool AbandonTransaction(const TxId &txid);
 
     /* Returns the wallets help message */
     static std::string GetWalletHelpString(bool showDebug);
