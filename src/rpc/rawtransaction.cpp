@@ -129,7 +129,7 @@ void TxToJSONExpanded(const Config &config, const CTransaction& tx, const uint25
         const CTxOut& txout = tx.vout[i];
         UniValue out(UniValue::VOBJ);
         out.push_back(Pair("value", ValueFromAmount(txout.nValue)));
-        out.push_back(Pair("valueSat", txout.nValue.GetSatoshis()));
+        out.push_back(Pair("valueSat", txout.nValue / SATOSHI));
         out.push_back(Pair("n", (int64_t)i));
         UniValue o(UniValue::VOBJ);
         ScriptPubKeyToJSON(config, txout.scriptPubKey, o, true);
@@ -200,7 +200,7 @@ void TxToJSON(const Config &config, const CTransaction &tx,
         const CTxOut &txout = tx.vout[i];
         UniValue out(UniValue::VOBJ);
         out.push_back(Pair("value", ValueFromAmount(txout.nValue)));
-        out.push_back(Pair("valueSat", txout.nValue.GetSatoshis()));
+        out.push_back(Pair("valueSat", txout.nValue / SATOSHI));
         out.push_back(Pair("n", (int64_t)i));
         UniValue o(UniValue::VOBJ);
         ScriptPubKeyToJSON(config, txout.scriptPubKey, o, true);

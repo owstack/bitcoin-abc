@@ -1820,7 +1820,7 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
                     std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+2, out.scriptPubKey.begin()+22);
 
                     // undo receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue.GetSatoshis()));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue / SATOSHI));
 
                     // undo unspent index
                     addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txid, k), CAddressUnspentValue()));
@@ -1829,7 +1829,7 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
                     std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+3, out.scriptPubKey.begin()+23);
 
                     // undo receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue.GetSatoshis()));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue / SATOSHI));
 
                     // undo unspent index
                     addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txid, k), CAddressUnspentValue()));
@@ -1891,22 +1891,22 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
                     std::vector<unsigned char> hashBytes(prevout.scriptPubKey.begin()+2, prevout.scriptPubKey.begin()+22);
 
                     // undo spending activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txid, j, true), prevout.nValue.GetSatoshis() * -1));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txid, j, true), prevout.nValue / SATOSHI * -1));
 
                     // restore unspent index
                     // WARNING: UndoCoinSpend NOW RETURNS A COIN INSTEAD OF A CTxInUndo (UNDO.nHeight NO LONGER EXITS, NOW IT'S GETHEIGHT)
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue(prevout.nValue.GetSatoshis(), prevout.scriptPubKey, undo.GetHeight())));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue(prevout.nValue / SATOSHI, prevout.scriptPubKey, undo.GetHeight())));
 
 
                 } else if (prevout.scriptPubKey.IsPayToPublicKeyHash()) {
                     std::vector<unsigned char> hashBytes(prevout.scriptPubKey.begin()+3, prevout.scriptPubKey.begin()+23);
 
                     // undo spending activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txid, j, true), prevout.nValue.GetSatoshis() * -1));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txid, j, true), prevout.nValue / SATOSHI * -1));
 
                     // restore unspent index
                     // WARNING: UndoCoinSpend NOW RETURNS A COIN INSTEAD OF A CTxInUndo (UNDO.nHeight NO LONGER EXITS, NOW IT'S GETHEIGHT)
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue(prevout.nValue.GetSatoshis(), prevout.scriptPubKey, undo.GetHeight())));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue(prevout.nValue / SATOSHI, prevout.scriptPubKey, undo.GetHeight())));
 
                 } else {
                     continue;
@@ -2298,7 +2298,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
 
                 if (fAddressIndex && addressType > 0) {
                     // record spending activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(addressType, hashBytes, pindex->nHeight, i, txhash, j, true), prevout.nValue.GetSatoshis() * -1));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(addressType, hashBytes, pindex->nHeight, i, txhash, j, true), prevout.nValue / SATOSHI * -1));
 
                     // remove address from unspent index
                     addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(addressType, hashBytes, input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue()));
@@ -2307,7 +2307,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
                 if (fSpentIndex) {
                     // add the spent index to determine the txid and input that spent an output
                     // and to find the amount and address from an input
-                    spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.GetTxId(), input.prevout.GetN()), CSpentIndexValue(txhash, j, pindex->nHeight, prevout.nValue.GetSatoshis(), addressType, hashBytes)));
+                    spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.GetTxId(), input.prevout.GetN()), CSpentIndexValue(txhash, j, pindex->nHeight, prevout.nValue / SATOSHI, addressType, hashBytes)));
                 }
             }
         }
@@ -2351,19 +2351,19 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
                     std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+2, out.scriptPubKey.begin()+22);
 
                     // record receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue.GetSatoshis()));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue / SATOSHI));
 
                     // record unspent output
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue.GetSatoshis(), out.scriptPubKey, pindex->nHeight)));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue / SATOSHI, out.scriptPubKey, pindex->nHeight)));
 
                 } else if (out.scriptPubKey.IsPayToPublicKeyHash()) {
                     std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+3, out.scriptPubKey.begin()+23);
 
                     // record receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue.GetSatoshis()));
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue / SATOSHI));
 
                     // record unspent output
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue.GetSatoshis(), out.scriptPubKey, pindex->nHeight)));
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue / SATOSHI, out.scriptPubKey, pindex->nHeight)));
 
                 } else {
                     continue;
