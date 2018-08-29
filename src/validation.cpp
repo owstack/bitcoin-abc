@@ -2253,96 +2253,95 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
         const CTransaction &tx = *ptx;
         const uint256 txhash = tx.GetHash();
 
-        if (tx.IsCoinBase()) {
-            continue;
-        }
+        if (!tx.IsCoinBase()) {
 
-        if (!view.HaveInputs(tx)) {
-            return state.DoS(100, error("ConnectBlock(): inputs missing/spent"),
-                             REJECT_INVALID, "bad-txns-inputs-missingorspent");
-        }
+            if (!view.HaveInputs(tx)) {
+                return state.DoS(100, error("ConnectBlock(): inputs missing/spent"),
+                                REJECT_INVALID, "bad-txns-inputs-missingorspent");
+            }
 
-        // Check that transaction is BIP68 final BIP68 lock checks (as
-        // opposed to nLockTime checks) must be in ConnectBlock because they
-        // require the UTXO set.
-        prevheights.resize(tx.vin.size());
-        for (size_t j = 0; j < tx.vin.size(); j++) {
-            prevheights[j] = view.AccessCoin(tx.vin[j].prevout).GetHeight();
-        }
-
-        if (!SequenceLocks(tx, nLockTimeFlags, &prevheights, *pindex)) {
-            return state.DoS(
-                100,
-                error("%s: contains a non-BIP68-final transaction", __func__),
-                REJECT_INVALID, "bad-txns-nonfinal");
-        }
-
-        if (fAddressIndex || fSpentIndex)
-        {
+            // Check that transaction is BIP68 final BIP68 lock checks (as
+            // opposed to nLockTime checks) must be in ConnectBlock because they
+            // require the UTXO set.
+            prevheights.resize(tx.vin.size());
             for (size_t j = 0; j < tx.vin.size(); j++) {
+                prevheights[j] = view.AccessCoin(tx.vin[j].prevout).GetHeight();
+            }
 
-                const CTxIn input = tx.vin[j];
-                const CTxOut &prevout = view.GetOutputFor(tx.vin[j]);
-                uint160 hashBytes;
-                int addressType;
+            if (!SequenceLocks(tx, nLockTimeFlags, &prevheights, *pindex)) {
+                return state.DoS(
+                    100,
+                    error("%s: contains a non-BIP68-final transaction", __func__),
+                    REJECT_INVALID, "bad-txns-nonfinal");
+            }
 
-                if (prevout.scriptPubKey.IsPayToScriptHash()) {
-                    hashBytes = uint160(std::vector <unsigned char>(prevout.scriptPubKey.begin()+2, prevout.scriptPubKey.begin()+22));
-                    addressType = 2;
-                } else if (prevout.scriptPubKey.IsPayToPublicKeyHash()) {
-                    hashBytes = uint160(std::vector <unsigned char>(prevout.scriptPubKey.begin()+3, prevout.scriptPubKey.begin()+23));
-                    addressType = 1;
-                } else {
-                    hashBytes.SetNull();
-                    addressType = 0;
-                }
+            if (fAddressIndex || fSpentIndex)
+            {
+                for (size_t j = 0; j < tx.vin.size(); j++) {
 
-                if (fAddressIndex && addressType > 0) {
-                    // record spending activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(addressType, hashBytes, pindex->nHeight, i, txhash, j, true), prevout.nValue / SATOSHI * -1));
+                    const CTxIn input = tx.vin[j];
+                    const CTxOut &prevout = view.GetOutputFor(tx.vin[j]);
+                    uint160 hashBytes;
+                    int addressType;
 
-                    // remove address from unspent index
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(addressType, hashBytes, input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue()));
-                }
+                    if (prevout.scriptPubKey.IsPayToScriptHash()) {
+                        hashBytes = uint160(std::vector <unsigned char>(prevout.scriptPubKey.begin()+2, prevout.scriptPubKey.begin()+22));
+                        addressType = 2;
+                    } else if (prevout.scriptPubKey.IsPayToPublicKeyHash()) {
+                        hashBytes = uint160(std::vector <unsigned char>(prevout.scriptPubKey.begin()+3, prevout.scriptPubKey.begin()+23));
+                        addressType = 1;
+                    } else {
+                        hashBytes.SetNull();
+                        addressType = 0;
+                    }
 
-                if (fSpentIndex) {
-                    // add the spent index to determine the txid and input that spent an output
-                    // and to find the amount and address from an input
-                    spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.GetTxId(), input.prevout.GetN()), CSpentIndexValue(txhash, j, pindex->nHeight, prevout.nValue / SATOSHI, addressType, hashBytes)));
+                    if (fAddressIndex && addressType > 0) {
+                        // record spending activity
+                        addressIndex.push_back(std::make_pair(CAddressIndexKey(addressType, hashBytes, pindex->nHeight, i, txhash, j, true), prevout.nValue / SATOSHI * -1));
+
+                        // remove address from unspent index
+                        addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(addressType, hashBytes, input.prevout.GetTxId(), input.prevout.GetN()), CAddressUnspentValue()));
+                    }
+
+                    if (fSpentIndex) {
+                        // add the spent index to determine the txid and input that spent an output
+                        // and to find the amount and address from an input
+                        spentIndex.push_back(std::make_pair(CSpentIndexKey(input.prevout.GetTxId(), input.prevout.GetN()), CSpentIndexValue(txhash, j, pindex->nHeight, prevout.nValue / SATOSHI, addressType, hashBytes)));
+                    }
                 }
             }
+
+            // GetTransactionSigOpCount counts 2 types of sigops:
+            // * legacy (always)
+            // * p2sh (when P2SH enabled in flags and excludes coinbase)
+            auto txSigOpsCount = GetTransactionSigOpCount(tx, view, flags);
+            if (txSigOpsCount > MAX_TX_SIGOPS_COUNT) {
+                return state.DoS(100, false, REJECT_INVALID, "bad-txn-sigops");
+            }
+
+            nSigOpsCount += txSigOpsCount;
+            if (nSigOpsCount > nMaxSigOpsCount) {
+                return state.DoS(100, error("ConnectBlock(): too many sigops"),
+                                REJECT_INVALID, "bad-blk-sigops");
+            }
+
+            Amount fee = view.GetValueIn(tx) - tx.GetValueOut();
+            nFees += fee;
+
+            // Don't cache results if we're actually connecting blocks (still
+            // consult the cache, though).
+            bool fCacheResults = fJustCheck;
+
+            std::vector<CScriptCheck> vChecks;
+            if (!CheckInputs(tx, state, view, fScriptChecks, flags, fCacheResults,
+                            fCacheResults, PrecomputedTransactionData(tx),
+                            &vChecks)) {
+                return error("ConnectBlock(): CheckInputs on %s failed with %s",
+                            tx.GetId().ToString(), FormatStateMessage(state));
+            }
+
+            control.Add(vChecks);
         }
-
-        // GetTransactionSigOpCount counts 2 types of sigops:
-        // * legacy (always)
-        // * p2sh (when P2SH enabled in flags and excludes coinbase)
-        auto txSigOpsCount = GetTransactionSigOpCount(tx, view, flags);
-        if (txSigOpsCount > MAX_TX_SIGOPS_COUNT) {
-            return state.DoS(100, false, REJECT_INVALID, "bad-txn-sigops");
-        }
-
-        nSigOpsCount += txSigOpsCount;
-        if (nSigOpsCount > nMaxSigOpsCount) {
-            return state.DoS(100, error("ConnectBlock(): too many sigops"),
-                             REJECT_INVALID, "bad-blk-sigops");
-        }
-
-        Amount fee = view.GetValueIn(tx) - tx.GetValueOut();
-        nFees += fee;
-
-        // Don't cache results if we're actually connecting blocks (still
-        // consult the cache, though).
-        bool fCacheResults = fJustCheck;
-
-        std::vector<CScriptCheck> vChecks;
-        if (!CheckInputs(tx, state, view, fScriptChecks, flags, fCacheResults,
-                         fCacheResults, PrecomputedTransactionData(tx),
-                         &vChecks)) {
-            return error("ConnectBlock(): CheckInputs on %s failed with %s",
-                         tx.GetId().ToString(), FormatStateMessage(state));
-        }
-
-        control.Add(vChecks);
 
         if (fAddressIndex) {
             for (unsigned int k = 0; k < tx.vout.size(); k++) {
@@ -2372,12 +2371,13 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
 
             }
         }
-    
-        blockundo.vtxundo.push_back(CTxUndo());
-        SpendCoins(view, tx, blockundo.vtxundo.back(), pindex->nHeight);
 
-        if (!fIsMagneticAnomalyEnabled) {
-            AddCoins(view, tx, pindex->nHeight);
+        if (!tx.IsCoinBase()) {
+            blockundo.vtxundo.push_back(CTxUndo());
+            SpendCoins(view, tx, blockundo.vtxundo.back(), pindex->nHeight);
+            if (!fIsMagneticAnomalyEnabled) {
+                AddCoins(view, tx, pindex->nHeight);
+            }
         }
         ++i;
     }
