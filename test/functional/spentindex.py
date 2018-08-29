@@ -16,29 +16,17 @@ import binascii
 from test_framework.blocktools import *
 from test_framework.key import CECKey
 
-UAHF_START_TIME = 2000000000
-
 class SpentIndexTest(BitcoinTestFramework):
-
-    def setup_chain(self):
-        print("Initializing test directory "+self.options.tmpdir)
-        initialize_chain_clean(self.options.tmpdir, 4)
+    def set_test_params(self):
+        self.num_nodes = 4
+        self.setup_clean_chain = True    
+        self.extra_args = [["-debug"],["-debug", "-spentindex"],["-debug", "-spentindex"], ["-debug", "-spentindex", "-txindex"]]
 
     def setup_network(self):
-        self.nodes = []
+        self.setup_nodes()
+
         # Nodes 0/1 are "wallet" nodes
-        self.nodes.append(start_node(0, self.options.tmpdir, ["-debug", "-uahfstarttime=%d" % UAHF_START_TIME]))
-        self.nodes.append(start_node(1, self.options.tmpdir, ["-debug", "-spentindex", "-uahfstarttime=%d" % UAHF_START_TIME]))
         # Nodes 2/3 are used for testing
-        self.nodes.append(start_node(2, self.options.tmpdir, ["-debug", "-spentindex", "-uahfstarttime=%d" % UAHF_START_TIME]))
-        self.nodes.append(start_node(3, self.options.tmpdir, ["-debug", "-spentindex", "-txindex", "-uahfstarttime=%d" % UAHF_START_TIME]))
-
-        # Mock the time so that block activating the HF will be accepted
-        self.nodes[0].setmocktime(UAHF_START_TIME)
-        self.nodes[1].setmocktime(UAHF_START_TIME)
-        self.nodes[2].setmocktime(UAHF_START_TIME)
-        self.nodes[3].setmocktime(UAHF_START_TIME)
-
         connect_nodes(self.nodes[0], 1)
         connect_nodes(self.nodes[0], 2)
         connect_nodes(self.nodes[0], 3)
@@ -47,21 +35,8 @@ class SpentIndexTest(BitcoinTestFramework):
         self.sync_all()
 
     def run_test(self):
-        print("First block at UAHF start time...")
-        base_block_hash = int(self.nodes[0].getbestblockhash(), 16)
-        block_time = UAHF_START_TIME
-        height = 1
-        coinbase_key = CECKey()
-        coinbase_key.set_secretbytes(b"fatstacks")
-        coinbase_pubkey = coinbase_key.get_pubkey()
-        coinbase = create_coinbase(height, coinbase_pubkey)
-        block = create_block(base_block_hash, coinbase, block_time)
-        block.solve()
-        self.nodes[0].submitblock(ToHex(block))
-        self.sync_all()
-
         print("Mining blocks...")
-        self.nodes[0].generate(104)
+        self.nodes[0].generate(105)
         self.sync_all()
 
         chain_height = self.nodes[1].getblockcount()

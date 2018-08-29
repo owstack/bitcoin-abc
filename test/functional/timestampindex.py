@@ -15,18 +15,16 @@ from test_framework.util import *
 
 class TimestampIndexTest(BitcoinTestFramework):
 
-    def setup_chain(self):
-        print("Initializing test directory "+self.options.tmpdir)
-        initialize_chain_clean(self.options.tmpdir, 4)
+    def set_test_params(self):
+        self.num_nodes = 4
+        self.setup_clean_chain = True    
+        self.extra_args = [["-debug"],["-debug", "-timestampindex"],["-debug"], ["-debug", "-timestampindex"]]
 
     def setup_network(self):
-        self.nodes = []
+        self.setup_nodes()
+
         # Nodes 0/1 are "wallet" nodes
-        self.nodes.append(start_node(0, self.options.tmpdir, ["-debug"]))
-        self.nodes.append(start_node(1, self.options.tmpdir, ["-debug", "-timestampindex"]))
         # Nodes 2/3 are used for testing
-        self.nodes.append(start_node(2, self.options.tmpdir, ["-debug"]))
-        self.nodes.append(start_node(3, self.options.tmpdir, ["-debug", "-timestampindex"]))
         connect_nodes(self.nodes[0], 1)
         connect_nodes(self.nodes[0], 2)
         connect_nodes(self.nodes[0], 3)
