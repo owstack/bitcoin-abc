@@ -1792,8 +1792,7 @@ static DisconnectResult DisconnectBlock(const CBlock &block,
 
 DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
                                 const CBlock &block, const CBlockIndex *pindex,
-                                CCoinsViewCache &view,
-                                bool fJustCheck) {
+                                CCoinsViewCache &view, bool fJustCheck) {
     bool fClean = true;
 
     if (blockUndo.vtxundo.size() + 1 != block.vtx.size()) {
@@ -1805,63 +1804,10 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
     std::vector<std::pair<CAddressUnspentKey, CAddressUnspentValue> > addressUnspentIndex;
     std::vector<std::pair<CSpentIndexKey, CSpentIndexValue> > spentIndex;
 
-    // Undo transactions in reverse order.
-    size_t i = block.vtx.size();
-    while (i-- > 0) {
+    // First, restore inputs.
+    for (size_t i = 1; i < block.vtx.size(); i++) {
         const CTransaction &tx = *(block.vtx[i]);
         uint256 txid = tx.GetId();
-
-        if (fAddressIndex) {
-
-            for (unsigned int k = tx.vout.size(); k-- > 0;) {
-                const CTxOut &out = tx.vout[k];
-
-                if (out.scriptPubKey.IsPayToScriptHash()) {
-                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+2, out.scriptPubKey.begin()+22);
-
-                    // undo receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue / SATOSHI));
-
-                    // undo unspent index
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txid, k), CAddressUnspentValue()));
-
-                } else if (out.scriptPubKey.IsPayToPublicKeyHash()) {
-                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+3, out.scriptPubKey.begin()+23);
-
-                    // undo receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue / SATOSHI));
-
-                    // undo unspent index
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txid, k), CAddressUnspentValue()));
-
-                } else {
-                    continue;
-                }
-
-            }
-
-        }
-
-        // Check that all outputs are available and match the outputs in the
-        // block itself exactly.
-        for (size_t o = 0; o < tx.vout.size(); o++) {
-            if (tx.vout[o].scriptPubKey.IsUnspendable()) {
-                continue;
-            }
-
-            COutPoint out(txid, o);
-            Coin coin;
-            bool is_spent = view.SpendCoin(out, &coin);
-            if (!is_spent || tx.vout[o] != coin.GetTxOut()) {
-                // transaction output mismatch
-                fClean = false;
-            }
-        }
-        // Restore inputs.
-        if (i < 1) {
-            // Skip the coinbase.
-            continue;
-        }
 
         const CTxUndo &txundo = blockUndo.vtxundo[i - 1];
         if (txundo.vprevout.size() != tx.vin.size()) {
@@ -1869,7 +1815,7 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
             return DISCONNECT_FAILED;
         }
 
-        for (size_t j = tx.vin.size(); j-- > 0;) {
+        for (size_t j = 0; j < tx.vin.size(); j++) {
             const COutPoint &out = tx.vin[j].prevout;
             const Coin &undo = txundo.vprevout[j];
             DisconnectResult res = UndoCoinSpend(undo, view, out);
@@ -1916,10 +1862,65 @@ DisconnectResult ApplyBlockUndo(const CBlockUndo &blockUndo,
         }
     }
 
+    // Second, revert created outputs.
+    size_t i = 0;
+    for (const auto &ptx : block.vtx) {
+        const CTransaction &tx = *ptx;
+        const TxId &txid = tx.GetId();
+
+        if (fAddressIndex) {
+
+            for (unsigned int k = tx.vout.size(); k-- > 0;) {
+                const CTxOut &out = tx.vout[k];
+
+                if (out.scriptPubKey.IsPayToScriptHash()) {
+                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+2, out.scriptPubKey.begin()+22);
+
+                    // undo receiving activity
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue / SATOSHI));
+
+                    // undo unspent index
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txid, k), CAddressUnspentValue()));
+
+                } else if (out.scriptPubKey.IsPayToPublicKeyHash()) {
+                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+3, out.scriptPubKey.begin()+23);
+
+                    // undo receiving activity
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txid, k, false), out.nValue / SATOSHI));
+
+                    // undo unspent index
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txid, k), CAddressUnspentValue()));
+
+                } else {
+                    continue;
+                }
+
+            }
+
+        }
+        ++i;
+
+        // Check that all outputs are available and match the outputs in the
+        // block itself exactly.
+        for (size_t o = 0; o < tx.vout.size(); o++) {
+            if (tx.vout[o].scriptPubKey.IsUnspendable()) {
+                continue;
+            }
+
+            COutPoint out(txid, o);
+            Coin coin;
+            bool is_spent = view.SpendCoin(out, &coin);
+            if (!is_spent || tx.vout[o] != coin.GetTxOut()) {
+                // transaction output mismatch
+                fClean = false;
+            }
+        }
+    }
+
     // Move best block pointer to previous block.
     view.SetBestBlock(block.hashPrevBlock);
 
-    //ApplyBlockUndo do not have the state parameter
+        //ApplyBlockUndo do not have the state parameter
     CValidationState state;
 
     if (!fJustCheck && fAddressIndex) {
