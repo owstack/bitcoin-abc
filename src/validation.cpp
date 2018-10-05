@@ -1886,6 +1886,7 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
     // for (size_t i = 0; i < block.vtx.size(); i++) {
     //     const CTransaction &tx = *(block.vtx[i]);
     //     const uint256 txhash = tx.GetHash();
+    size_t i = 0;
     for (const auto &ptx : block.vtx) {
         const CTransaction &tx = *ptx;
 
@@ -1902,9 +1903,40 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
         if (fIsMagneticAnomalyEnabled || tx.IsCoinBase()) {
             AddCoins(view, tx, pindex->nHeight);
         }
+
+        if (fAddressIndex) {
+            const uint256 txhash = tx.GetHash();
+            for (unsigned int k = 0; k < tx.vout.size(); k++) {
+                const CTxOut &out = tx.vout[k];
+
+                if (out.scriptPubKey.IsPayToScriptHash()) {
+                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+2, out.scriptPubKey.begin()+22);
+
+                    // record receiving activity
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue / SATOSHI));
+
+                    // record unspent output
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue / SATOSHI, out.scriptPubKey, pindex->nHeight)));
+
+                } else if (out.scriptPubKey.IsPayToPublicKeyHash()) {
+                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+3, out.scriptPubKey.begin()+23);
+
+                    // record receiving activity
+                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue / SATOSHI));
+
+                    // record unspent output
+                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue / SATOSHI, out.scriptPubKey, pindex->nHeight)));
+
+                } else {
+                    continue;
+                }
+
+            }
+        }
+        ++i;
     }
 
-    size_t i = 0;
+    i = 0;
     for (const auto &ptx : block.vtx) {
         const CTransaction &tx = *ptx;
         const uint256 txhash = tx.GetHash();
@@ -1997,35 +2029,6 @@ static bool ConnectBlock(const Config &config, const CBlock &block,
             }
 
             control.Add(vChecks);
-        }
-
-        if (fAddressIndex) {
-            for (unsigned int k = 0; k < tx.vout.size(); k++) {
-                const CTxOut &out = tx.vout[k];
-
-                if (out.scriptPubKey.IsPayToScriptHash()) {
-                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+2, out.scriptPubKey.begin()+22);
-
-                    // record receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(2, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue / SATOSHI));
-
-                    // record unspent output
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(2, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue / SATOSHI, out.scriptPubKey, pindex->nHeight)));
-
-                } else if (out.scriptPubKey.IsPayToPublicKeyHash()) {
-                    std::vector<unsigned char> hashBytes(out.scriptPubKey.begin()+3, out.scriptPubKey.begin()+23);
-
-                    // record receiving activity
-                    addressIndex.push_back(std::make_pair(CAddressIndexKey(1, uint160(hashBytes), pindex->nHeight, i, txhash, k, false), out.nValue / SATOSHI));
-
-                    // record unspent output
-                    addressUnspentIndex.push_back(std::make_pair(CAddressUnspentKey(1, uint160(hashBytes), txhash, k), CAddressUnspentValue(out.nValue / SATOSHI, out.scriptPubKey, pindex->nHeight)));
-
-                } else {
-                    continue;
-                }
-
-            }
         }
 
         if (!tx.IsCoinBase()) {
