@@ -96,6 +96,8 @@ BITCOIN_CORE_H = \
   blockencodings.h \
   blockfileinfo.h \
   blockindexworkcomparator.h \
+  blockstatus.h \
+  blockvalidity.h \
   cashaddr.h \
   cashaddrenc.h \
   chain.h \
@@ -112,10 +114,13 @@ BITCOIN_CORE_H = \
   compat/sanity.h \
   compressor.h \
   config.h \
+  consensus/activation.h \
   consensus/consensus.h \
+  consensus/tx_verify.h \
   core_io.h \
   core_memusage.h \
   cuckoocache.h \
+  diskblockpos.h \
   dstencode.h \
   fs.h \
   globals.h \
@@ -211,6 +216,8 @@ libbitcoin_server_a_SOURCES = \
   chain.cpp \
   checkpoints.cpp \
   config.cpp \
+  consensus/activation.cpp \
+  consensus/tx_verify.cpp \
   globals.cpp \
   httprpc.cpp \
   httpserver.cpp \

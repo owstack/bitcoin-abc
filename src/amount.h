@@ -18,16 +18,14 @@ struct Amount {
 private:
     int64_t amount;
 
+    explicit constexpr Amount(int64_t _amount) : amount(_amount) {}
+
 public:
     constexpr Amount() : amount(0) {}
-
-    template <typename T>
-    explicit constexpr Amount(T _camount) : amount(_camount) {
-        static_assert(std::is_integral<T>(),
-                      "Only integer types can be used as amounts");
-    }
-
     constexpr Amount(const Amount &_camount) : amount(_camount.amount) {}
+
+    static constexpr Amount zero() { return Amount(0); }
+    static constexpr Amount satoshi() { return Amount(1); }
 
     /**
      * Implement standard operators
@@ -110,8 +108,8 @@ public:
     /**
      * Modulus
      */
-    constexpr int64_t operator%(const Amount b) const {
-        return Amount(amount % b.amount) / Amount(1);
+    constexpr Amount operator%(const Amount b) const {
+        return Amount(amount % b.amount);
     }
     constexpr Amount operator%(const int64_t b) const {
         return Amount(amount % b);
@@ -145,14 +143,10 @@ public:
 /** Amount in satoshis (Can be negative) */
 typedef int64_t CAmount;
 
-// static const Amount COIN(100000000);
-// static const Amount CENT(1000000);
-
-static const Amount SATOSHI(1);
-static const Amount CASH = 100 * SATOSHI;
-static const Amount COIN = 100000000 * SATOSHI;
-static const Amount CENT = COIN / 100;
-
+static constexpr Amount SATOSHI = Amount::satoshi();
+static constexpr Amount CASH = 100 * SATOSHI;
+static constexpr Amount COIN = 100000000 * SATOSHI;
+static constexpr Amount CENT = COIN / 100;
 
 extern const std::string CURRENCY_UNIT;
 
@@ -168,7 +162,7 @@ extern const std::string CURRENCY_UNIT;
  */
 static const Amount MAX_MONEY = 21000000 * COIN;
 inline bool MoneyRange(const Amount nValue) {
-    return (nValue >= Amount(0) && nValue <= MAX_MONEY);
+    return nValue >= Amount::zero() && nValue <= MAX_MONEY;
 }
 
 #endif //  BITCOIN_AMOUNT_H

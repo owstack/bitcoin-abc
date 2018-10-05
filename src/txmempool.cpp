@@ -8,6 +8,7 @@
 #include "chainparams.h" // for GetConsensus.
 #include "clientversion.h"
 #include "consensus/consensus.h"
+#include "consensus/tx_verify.h"
 #include "consensus/validation.h"
 #include "policy/fees.h"
 #include "policy/policy.h"
@@ -41,7 +42,7 @@ CTxMemPoolEntry::CTxMemPoolEntry(const CTransactionRef &_tx, const Amount _nFee,
     Amount nValueIn = tx->GetValueOut() + nFee;
     assert(inChainInputValue <= nValueIn);
 
-    feeDelta = Amount(0);
+    feeDelta = Amount::zero();
 
     nCountWithAncestors = 1;
     nSizeWithAncestors = GetTxSize();
@@ -80,7 +81,7 @@ void CTxMemPoolEntry::UpdateLockPoints(const LockPoints &lp) {
 // descendants.
 void CTxMemPool::UpdateForDescendants(txiter updateIt,
                                       cacheMap &cachedDescendants,
-                                      const std::set<uint256> &setExclude) {
+                                      const std::set<TxId> &setExclude) {
     setEntries stageEntries, setAllDescendants;
     stageEntries = GetMemPoolChildren(updateIt);
 
@@ -106,7 +107,7 @@ void CTxMemPool::UpdateForDescendants(txiter updateIt,
     // setAllDescendants now contains all in-mempool descendants of updateIt.
     // Update and add to cached descendant map
     int64_t modifySize = 0;
-    Amount modifyFee(0);
+    Amount modifyFee = Amount::zero();
     int64_t modifyCount = 0;
     for (txiter cit : setAllDescendants) {
         if (!setExclude.count(cit->GetTx().GetId())) {
@@ -125,50 +126,50 @@ void CTxMemPool::UpdateForDescendants(txiter updateIt,
                  update_descendant_state(modifySize, modifyFee, modifyCount));
 }
 
-// vHashesToUpdate is the set of transaction hashes from a disconnected block
+// txidsToUpdate is the set of transaction hashes from a disconnected block
 // which has been re-added to the mempool. For each entry, look for descendants
-// that are outside hashesToUpdate, and add fee/size information for such
+// that are outside txidsToUpdate, and add fee/size information for such
 // descendants to the parent. For each such descendant, also update the ancestor
 // state to include the parent.
 void CTxMemPool::UpdateTransactionsFromBlock(
-    const std::vector<uint256> &vHashesToUpdate) {
+    const std::vector<TxId> &txidsToUpdate) {
     LOCK(cs);
-    // For each entry in vHashesToUpdate, store the set of in-mempool, but not
-    // in-vHashesToUpdate transactions, so that we don't have to recalculate
+    // For each entry in txidsToUpdate, store the set of in-mempool, but not
+    // in-txidsToUpdate transactions, so that we don't have to recalculate
     // descendants when we come across a previously seen entry.
     cacheMap mapMemPoolDescendantsToUpdate;
 
-    // Use a set for lookups into vHashesToUpdate (these entries are already
+    // Use a set for lookups into txidsToUpdate (these entries are already
     // accounted for in the state of their ancestors)
-    std::set<uint256> setAlreadyIncluded(vHashesToUpdate.begin(),
-                                         vHashesToUpdate.end());
+    std::set<TxId> setAlreadyIncluded(txidsToUpdate.begin(),
+                                      txidsToUpdate.end());
 
     // Iterate in reverse, so that whenever we are looking at at a transaction
     // we are sure that all in-mempool descendants have already been processed.
     // This maximizes the benefit of the descendant cache and guarantees that
     // setMemPoolChildren will be updated, an assumption made in
     // UpdateForDescendants.
-    for (const uint256 &hash : boost::adaptors::reverse(vHashesToUpdate)) {
+    for (const TxId &txid : boost::adaptors::reverse(txidsToUpdate)) {
         // we cache the in-mempool children to avoid duplicate updates
         setEntries setChildren;
         // calculate children from mapNextTx
-        txiter it = mapTx.find(hash);
+        txiter it = mapTx.find(txid);
         if (it == mapTx.end()) {
             continue;
         }
 
-        auto iter = mapNextTx.lower_bound(COutPoint(hash, 0));
+        auto iter = mapNextTx.lower_bound(COutPoint(txid, 0));
         // First calculate the children, and update setMemPoolChildren to
         // include them, and update their setMemPoolParents to include this tx.
-        for (; iter != mapNextTx.end() && iter->first->GetTxId() == hash;
+        for (; iter != mapNextTx.end() && iter->first->GetTxId() == txid;
              ++iter) {
-            const uint256 &childHash = iter->second->GetId();
-            txiter childIter = mapTx.find(childHash);
+            const TxId &childTxId = iter->second->GetId();
+            txiter childIter = mapTx.find(childTxId);
             assert(childIter != mapTx.end());
             // We can skip updating entries we've encountered before or that are
             // in the block (which are already accounted for).
             if (setChildren.insert(childIter).second &&
-                !setAlreadyIncluded.count(childHash)) {
+                !setAlreadyIncluded.count(childTxId)) {
                 UpdateChild(it, childIter, true);
                 UpdateParent(childIter, it, true);
             }
@@ -281,7 +282,7 @@ void CTxMemPool::UpdateEntryForAncestors(txiter it,
                                          const setEntries &setAncestors) {
     int64_t updateCount = setAncestors.size();
     int64_t updateSize = 0;
-    Amount updateFee(0);
+    Amount updateFee = Amount::zero();
     int64_t updateSigOpsCount = 0;
     for (txiter ancestorIt : setAncestors) {
         updateSize += ancestorIt->GetTxSize();
@@ -427,7 +428,7 @@ bool CTxMemPool::addUnchecked(const uint256 &hash, const CTxMemPoolEntry &entry,
     std::map<uint256, TXModifier>::const_iterator pos = mapDeltas.find(hash);
     if (pos != mapDeltas.end()) {
         const TXModifier &deltas = pos->second;
-        if (deltas.second != Amount(0)) {
+        if (deltas.second != Amount::zero()) {
             mapTx.modify(newit, update_fee_delta(deltas.second));
         }
     }
@@ -1320,7 +1321,7 @@ CTxMemPool::GetMemPoolChildren(txiter entry) const {
 CFeeRate CTxMemPool::GetMinFee(size_t sizelimit) const {
     LOCK(cs);
     if (!blockSinceLastRollingFeeBump || rollingMinimumFeeRate == 0) {
-        return CFeeRate(Amount(int64_t(rollingMinimumFeeRate)));
+        return CFeeRate(int64_t(rollingMinimumFeeRate) * SATOSHI);
     }
 
     int64_t time = GetTime();
@@ -1337,7 +1338,7 @@ CFeeRate CTxMemPool::GetMinFee(size_t sizelimit) const {
             pow(2.0, (time - lastRollingFeeUpdate) / halflife);
         lastRollingFeeUpdate = time;
     }
-    return CFeeRate(Amount(int64_t(rollingMinimumFeeRate)));
+    return CFeeRate(int64_t(rollingMinimumFeeRate) * SATOSHI);
 }
 
 void CTxMemPool::trackPackageRemoved(const CFeeRate &rate) {
@@ -1353,7 +1354,7 @@ void CTxMemPool::TrimToSize(size_t sizelimit,
     LOCK(cs);
 
     unsigned nTxnRemoved = 0;
-    CFeeRate maxFeeRateRemoved(Amount(0));
+    CFeeRate maxFeeRateRemoved(Amount::zero());
     while (!mapTx.empty() && DynamicMemoryUsage() > sizelimit) {
         indexed_transaction_set::index<descendant_score>::type::iterator it =
             mapTx.get<descendant_score>().begin();
@@ -1396,7 +1397,7 @@ void CTxMemPool::TrimToSize(size_t sizelimit,
         }
     }
 
-    if (maxFeeRateRemoved > CFeeRate(Amount(0))) {
+    if (maxFeeRateRemoved > CFeeRate(Amount::zero())) {
         LogPrint(BCLog::MEMPOOL,
                  "Removed %u txn, rolling minimum fee bumped to %s\n",
                  nTxnRemoved, maxFeeRateRemoved.ToString());
@@ -1446,15 +1447,15 @@ void DisconnectedBlockTransactions::addForBlock(
             for (const TxId &txid : worklist) {
                 // If we do not have that txid in the set, nothing needs to be
                 // done.
-                auto it = queuedTx.find(txid);
-                if (it == queuedTx.end()) {
+                auto pit = queuedTx.find(txid);
+                if (pit == queuedTx.end()) {
                     continue;
                 }
 
                 // We have parent in our set, we reinsert them at the right
                 // position.
-                const CTransactionRef ptx = *it;
-                queuedTx.erase(it);
+                const CTransactionRef ptx = *pit;
+                queuedTx.erase(pit);
                 queuedTx.insert(ptx);
 
                 // And we make sure ancestors are covered.
@@ -1478,7 +1479,7 @@ void DisconnectedBlockTransactions::addForBlock(
 void DisconnectedBlockTransactions::updateMempoolForReorg(const Config &config,
                                                           bool fAddToMempool) {
     AssertLockHeld(cs_main);
-    std::vector<uint256> vHashUpdate;
+    std::vector<TxId> txidsUpdate;
 
     // disconnectpool's insertion_order index sorts the entries from oldest to
     // newest, but the oldest entry will be the last tx from the latest mined
@@ -1497,7 +1498,7 @@ void DisconnectedBlockTransactions::updateMempoolForReorg(const Config &config,
             // transactions that depend on it (which would now be orphans).
             mempool.removeRecursive(*tx, MemPoolRemovalReason::REORG);
         } else if (mempool.exists(tx->GetId())) {
-            vHashUpdate.push_back(tx->GetId());
+            txidsUpdate.push_back(tx->GetId());
         }
     }
 
@@ -1508,7 +1509,7 @@ void DisconnectedBlockTransactions::updateMempoolForReorg(const Config &config,
     // previously-confirmed transactions back to the mempool.
     // UpdateTransactionsFromBlock finds descendants of any transactions in the
     // disconnectpool that were added back and cleans up the mempool state.
-    mempool.UpdateTransactionsFromBlock(vHashUpdate);
+    mempool.UpdateTransactionsFromBlock(txidsUpdate);
 
     // We also need to remove any now-immature transactions
     mempool.removeForReorg(config, pcoinsTip, chainActive.Tip()->nHeight + 1,
